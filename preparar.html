@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preparar escudos y logos - MarcaVivo</title>
+<style>
+  :root { color-scheme: light dark; --tinta: #14181f; --fondo: #f6f7f9; --caja: #fff; --borde: #ccd2dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --tinta: #e7eaee; --fondo: #0b0e12; --caja: #12161c; --borde: #2a3440; }
+  }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         line-height: 1.6; color: var(--tinta); background: var(--fondo); }
+  header { background: #0d2b4e; color: #fff; padding: 28px 20px; }
+  header div, main { max-width: 860px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 26px; }
+  h2 { font-size: 19px; margin: 28px 0 8px; }
+  main { padding: 24px 20px 64px; }
+  .zona { border: 2px dashed var(--borde); border-radius: 12px; padding: 32px 20px; text-align: center;
+          background: var(--caja); cursor: pointer; }
+  .zona.encima { border-color: #ffc107; }
+  .opciones { display: flex; flex-wrap: wrap; gap: 20px; margin: 20px 0; align-items: center; }
+  label { display: flex; align-items: center; gap: 6px; }
+  .previews { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 8px; }
+  .tarjeta { background: var(--caja); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
+  .tarjeta p { margin: 0 0 8px; font-size: 13px; opacity: .75; }
+  .marcador { background: rgba(0,0,0,.75); border-radius: 8px; padding: 8px 12px; display: flex;
+              align-items: center; gap: 10px; color: #fff; font-weight: 700; }
+  .marcador .hueco { width: 46px; height: 40px; background: #fff; border-radius: 5px; padding: 3px;
+                     display: flex; align-items: center; justify-content: center; }
+  .sponsor { width: 180px; height: 100px; background: #fff; border-radius: 8px; padding: 10px;
+             display: flex; align-items: center; justify-content: center; }
+  .fondo-cancha { background: #3b6d11; border-radius: 10px; padding: 14px; }
+  img.sale { max-width: 100%; max-height: 100%; display: block; }
+  button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--borde);
+           background: #ffc107; color: #412402; font-weight: 600; cursor: pointer; }
+  button[disabled] { opacity: .5; cursor: default; }
+  .datos { font-size: 14px; opacity: .8; }
+  a { color: #0d47a1; }
+  @media (prefers-color-scheme: dark) { a { color: #8ab4f8; } }
+</style>
+</head>
+<body>
+<header><div>
+  <h1>Preparar escudos y logos</h1>
+</div></header>
+<main>
+  <p>
+    Solta la imagen del club o del sponsor, y esta pagina la deja lista para MarcaVivo: le saca los
+    margenes de sobra y la guarda en el tamano justo que usa la app. Todo pasa en tu compu; la imagen
+    no se sube a ningun lado.
+  </p>
+
+  <div class="zona" id="zona">
+    <strong>Arrastra la imagen aca</strong><br>
+    <span class="datos">o toca para elegir un archivo (PNG, JPG o WEBP)</span>
+    <input type="file" id="archivo" accept="image/*" hidden>
+  </div>
+
+  <div class="opciones">
+    <label><input type="checkbox" id="recortar" checked> Sacar los margenes de sobra</label>
+    <label><input type="checkbox" id="blanco"> Poner fondo blanco (para logos con transparencia)</label>
+  </div>
+
+  <div id="resultado" hidden>
+    <h2>Como se va a ver</h2>
+    <div class="previews">
+      <div class="tarjeta">
+        <p>En el marcador (escudo del equipo)</p>
+        <div class="fondo-cancha">
+          <div class="marcador">
+            <span class="hueco"><img class="sale" id="p1" alt=""></span>
+            <span>ALL BOYS</span><span>12</span><span style="opacity:.7">vs</span><span>10</span>
+            <span>RIVAL</span>
+          </div>
+        </div>
+      </div>
+      <div class="tarjeta">
+        <p>En la esquina (logo de sponsor)</p>
+        <div class="fondo-cancha">
+          <div class="sponsor"><img class="sale" id="p2" alt=""></div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Archivo listo</h2>
+    <p class="datos" id="datos"></p>
+    <button id="bajar">Descargar PNG</button>
+  </div>
+
+  <h2>Como se usa en la app</h2>
+  <ul>
+    <li><strong>Escudo de un equipo:</strong> en "Datos del partido", el recuadro que dice Escudo.</li>
+    <li><strong>Logo de sponsor:</strong> en "Datos del partido", boton LOGOS, y despues AGREGAR.</li>
+  </ul>
+  <p class="datos"><a href="index.html">Volver a MarcaVivo</a></p>
+</main>
+
+<script>
+const LADO_MAXIMO = 1024;
+const zona = document.getElementById('zona');
+const entrada = document.getElementById('archivo');
+const recortar = document.getElementById('recortar');
+const blanco = document.getElementById('blanco');
+const resultado = document.getElementById('resultado');
+const datos = document.getElementById('datos');
+const bajar = document.getElementById('bajar');
+let ultimaImagen = null, ultimoNombre = 'logo', urlSalida = null;
+
+zona.addEventListener('click', () => entrada.click());
+entrada.addEventListener('change', () => { if (entrada.files[0]) cargar(entrada.files[0]); });
+['dragenter', 'dragover'].forEach(e => zona.addEventListener(e, ev => {
+  ev.preventDefault(); zona.classList.add('encima');
+}));
+['dragleave', 'drop'].forEach(e => zona.addEventListener(e, ev => {
+  ev.preventDefault(); zona.classList.remove('encima');
+}));
+zona.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) cargar(ev.dataTransfer.files[0]); });
+recortar.addEventListener('change', procesar);
+blanco.addEventListener('change', procesar);
+
+function cargar(archivo) {
+  if (!archivo.type.startsWith('image/')) { alert('Eso no es una imagen.'); return; }
+  ultimoNombre = archivo.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').toLowerCase();
+  const img = new Image();
+  img.onload = () => { ultimaImagen = img; procesar(); };
+  img.onerror = () => alert('No se pudo abrir la imagen.');
+  img.src = URL.createObjectURL(archivo);
+}
+
+// Busca hasta donde llega el dibujo: descarta los bordes del color de las esquinas.
+function limites(datosImg, ancho, alto) {
+  const p = datosImg.data;
+  const esquina = (x, y) => { const i = (y * ancho + x) * 4; return [p[i], p[i+1], p[i+2], p[i+3]]; };
+  const refs = [esquina(0, 0), esquina(ancho-1, 0), esquina(0, alto-1), esquina(ancho-1, alto-1)];
+  const fondo = (x, y) => {
+    const i = (y * ancho + x) * 4;
+    if (p[i+3] < 12) return true;
+    return refs.some(r => r[3] >= 12 &&
+      Math.abs(p[i]-r[0]) < 22 && Math.abs(p[i+1]-r[1]) < 22 && Math.abs(p[i+2]-r[2]) < 22);
+  };
+  let x0 = 0, y0 = 0, x1 = ancho - 1, y1 = alto - 1;
+  const filaVacia = y => { for (let x = x0; x <= x1; x++) if (!fondo(x, y)) return false; return true; };
+  const colVacia = x => { for (let y = y0; y <= y1; y++) if (!fondo(x, y)) return false; return true; };
+  while (y0 < y1 && filaVacia(y0)) y0++;
+  while (y1 > y0 && filaVacia(y1)) y1--;
+  while (x0 < x1 && colVacia(x0)) x0++;
+  while (x1 > x0 && colVacia(x1)) x1--;
+  const margen = 4;
+  return {
+    x: Math.max(0, x0 - margen), y: Math.max(0, y0 - margen),
+    w: Math.min(ancho, x1 + margen) - Math.max(0, x0 - margen) + 1,
+    h: Math.min(alto, y1 + margen) - Math.max(0, y0 - margen) + 1,
+  };
+}
+
+function procesar() {
+  if (!ultimaImagen) return;
+  const img = ultimaImagen;
+  const medida = document.createElement('canvas');
+  medida.width = img.naturalWidth; medida.height = img.naturalHeight;
+  const mc = medida.getContext('2d', { willReadFrequently: true });
+  mc.drawImage(img, 0, 0);
+  let corte = { x: 0, y: 0, w: medida.width, h: medida.height };
+  if (recortar.checked) {
+    try { corte = limites(mc.getImageData(0, 0, medida.width, medida.height), medida.width, medida.height); }
+    catch (e) { /* imagen de otro origen: se deja entera */ }
+  }
+  const escala = Math.min(1, LADO_MAXIMO / Math.max(corte.w, corte.h));
+  const salida = document.createElement('canvas');
+  salida.width = Math.max(1, Math.round(corte.w * escala));
+  salida.height = Math.max(1, Math.round(corte.h * escala));
+  const sc = salida.getContext('2d');
+  sc.imageSmoothingQuality = 'high';
+  if (blanco.checked) { sc.fillStyle = '#fff'; sc.fillRect(0, 0, salida.width, salida.height); }
+  sc.drawImage(img, corte.x, corte.y, corte.w, corte.h, 0, 0, salida.width, salida.height);
+
+  salida.toBlob(blob => {
+    if (urlSalida) URL.revokeObjectURL(urlSalida);
+    urlSalida = URL.createObjectURL(blob);
+    document.getElementById('p1').src = urlSalida;
+    document.getElementById('p2').src = urlSalida;
+    datos.textContent = `${salida.width} x ${salida.height} px, ${Math.round(blob.size / 1024)} KB` +
+      (escala < 1 ? ' (achicada para la app)' : '');
+    resultado.hidden = false;
+  }, 'image/png');
+}
+
+bajar.addEventListener('click', () => {
+  if (!urlSalida) return;
+  const a = document.createElement('a');
+  a.href = urlSalida;
+  a.download = `${ultimoNombre}_marcavivo.png`;
+  a.click();
+});
+</script>
+</body>
+</html>
