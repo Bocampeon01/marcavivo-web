@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>MarcaVivo - tablero</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0e12; color: #e7eaee; font-family: system-ui, -apple-system,
+         "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+  main { max-width: 680px; margin: 0 auto; padding: 12px 12px 32px; }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  h1 span { color: #ffc107; }
+  .estado { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 10px; }
+  .punto { width: 10px; height: 10px; border-radius: 50%; background: #888; }
+  .punto.ok { background: #e53935; }
+  .equipos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .equipo { background: #12161c; border-radius: 12px; padding: 10px; }
+  .nombre { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .colores { width: 14px; height: 20px; border: 1px solid #ffffff55; flex: none; }
+  .colores div { height: 50%; }
+  .tantos { font-size: 44px; font-weight: 700; text-align: center; line-height: 1.1;
+            font-variant-numeric: tabular-nums; }
+  button { font: inherit; color: #e7eaee; background: #1e2733; border: 1px solid #33404f;
+           border-radius: 10px; padding: 14px 10px; cursor: pointer; }
+  button:active { transform: scale(.98); }
+  button.mas { background: #1565c0; border-color: #1565c0; font-size: 22px; font-weight: 700;
+               flex: 1; }
+  button.menos { width: 64px; }
+  button.entrar { background: #1565c0; border-color: #1565c0; font-weight: 700; width: 100%;
+                  padding: 16px; font-size: 17px; margin-top: 12px; }
+  .fila { display: flex; gap: 8px; }
+  .reloj { text-align: center; font-size: 40px; font-weight: 700; margin: 14px 0 6px;
+           font-variant-numeric: tabular-nums; color: #ffc107; }
+  .reloj small { display: block; font-size: 13px; color: #98a2b3; font-weight: 400; }
+  .acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .acciones button.ancho { grid-column: 1 / -1; }
+  dialog { background: #12161c; color: #e7eaee; border: 1px solid #33404f; border-radius: 12px;
+           width: min(420px, 92vw); }
+  dialog h3 { margin: 0 0 10px; }
+  input { font: inherit; width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px;
+          border: 1px solid #33404f; background: #0b0e12; color: #e7eaee; }
+  .codigo { text-transform: uppercase; letter-spacing: 6px; font-size: 26px; text-align: center;
+            font-weight: 700; }
+  .ajustes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .ajustes button { flex: 1 1 30%; }
+  .aviso { background: #3a2a00; border: 1px solid #ffc10755; padding: 10px; border-radius: 10px;
+           font-size: 14px; margin-bottom: 10px; }
+  .ayuda { color: #98a2b3; font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <div id="aviso" class="aviso" hidden></div>
+
+  <!-- Pantalla de entrada: se pide el codigo que muestra el celular -->
+  <section id="entrada">
+    <h1>MarcaVivo <span>· tablero</span></h1>
+    <p class="ayuda">Manejá el marcador desde acá, esté donde esté el celular que filma.
+      Escribí el <strong>código</strong> que muestra ese celular en la pantalla de control.</p>
+    <input id="txtCodigo" class="codigo" maxlength="6" placeholder="XXXXXX"
+           autocomplete="off" autocapitalize="characters">
+    <button class="entrar" id="btnEntrar">ENTRAR</button>
+  </section>
+
+  <!-- Pantalla de control: igual que la del wifi -->
+  <section id="control" hidden>
+    <div class="estado"><span class="punto" id="punto"></span><span id="conexion">Conectando...</span></div>
+
+    <div class="equipos">
+      <div class="equipo">
+        <div class="nombre"><span class="colores" id="colLocal"><div></div><div></div></span>
+          <span id="nomLocal">Local</span></div>
+        <div class="tantos" id="tantosLocal">0</div>
+        <div class="fila">
+          <button class="menos" onclick="gol(true,-1)">-1</button>
+          <button class="mas" onclick="gol(true,1)">+1</button>
+        </div>
+      </div>
+      <div class="equipo">
+        <div class="nombre"><span class="colores" id="colVisita"><div></div><div></div></span>
+          <span id="nomVisita">Visitante</span></div>
+        <div class="tantos" id="tantosVisita">0</div>
+        <div class="fila">
+          <button class="menos" onclick="gol(false,-1)">-1</button>
+          <button class="mas" onclick="gol(false,1)">+1</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="reloj" id="reloj">--:--<small id="fase">&nbsp;</small></div>
+
+    <div class="acciones">
+      <button class="ancho" id="btnReloj" onclick="mandar({cmd:'reloj'})">INICIAR</button>
+      <button onclick="abrirAjuste()">AJUSTAR RELOJ</button>
+      <button id="btnEspera" onclick="espera()">PANTALLA</button>
+      <button class="ancho" id="btnBanner" onclick="abrirBanner()">BANNER</button>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlgAjuste">
+  <h3>Reloj</h3>
+  <div class="ajustes" style="align-items:center">
+    <span style="flex:0 0 auto">Poner en</span>
+    <input id="txtMin" type="number" min="0" max="99" style="width:70px;flex:0 0 auto" inputmode="numeric">
+    <span style="flex:0 0 auto">:</span>
+    <input id="txtSeg" type="number" min="0" max="59" style="width:70px;flex:0 0 auto" inputmode="numeric">
+    <button onclick="ponerReloj()" style="flex:0 0 auto">PONER</button>
+  </div>
+  <p style="font-size:13px;color:#98a2b3;margin:12px 0 0">O corregir de a poco:</p>
+  <div class="ajustes">
+    <button onclick="mandar({cmd:'ajustar',segundos:-60})">-1 min</button>
+    <button onclick="mandar({cmd:'ajustar',segundos:-10})">-10 s</button>
+    <button onclick="mandar({cmd:'ajustar',segundos:-1})">-1 s</button>
+    <button onclick="mandar({cmd:'ajustar',segundos:1})">+1 s</button>
+    <button onclick="mandar({cmd:'ajustar',segundos:10})">+10 s</button>
+    <button onclick="mandar({cmd:'ajustar',segundos:60})">+1 min</button>
+  </div>
+  <div class="ajustes">
+    <button onclick="mandar({cmd:'terminarTiempo'})">TERMINAR ESTE TIEMPO</button>
+    <button onclick="dlgAjuste.close()">LISTO</button>
+  </div>
+</dialog>
+
+<dialog id="dlgBanner">
+  <h3>Banner de abajo</h3>
+  <input id="txtBanner" maxlength="90" placeholder="Gol de Juan Perez">
+  <div class="ajustes">
+    <button onclick="mandarBanner('')">QUITAR</button>
+    <button onclick="dlgBanner.close()">CANCELAR</button>
+    <button onclick="mandarBanner(txtBanner.value)">MOSTRAR</button>
+  </div>
+</dialog>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+// La config de Firebase no es secreta: identifica al proyecto, va a la vista en la pagina.
+// Lo que protege los datos son las reglas de seguridad de la base.
+const firebaseConfig = {
+  apiKey: "AIzaSyBzvM1xcINIEK13awX72hHvwqwytlCgjyA",
+  authDomain: "marcavivo-ce14c.firebaseapp.com",
+  databaseURL: "https://marcavivo-ce14c-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "marcavivo-ce14c",
+  appId: "1:72778795291:web:23600f43e8250ea84babbe",
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let refSesion = null, estado = null, listo = false;
+
+const $ = (id) => document.getElementById(id);
+function aviso(t) { const a = $('aviso'); a.textContent = t; a.hidden = !t; }
+
+// Se entra sin cuenta: un login anonimo alcanza para que las reglas dejen leer y escribir.
+firebase.auth().signInAnonymously().catch((e) => aviso('No se pudo conectar con el servidor: ' + e.message));
+
+// Si el codigo viene en el link (?c=XXXXXX), se entra directo.
+const codigoUrl = (new URLSearchParams(location.search).get('c') || '').toUpperCase();
+if (codigoUrl) { $('txtCodigo').value = codigoUrl; }
+
+$('btnEntrar').onclick = entrar;
+$('txtCodigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+
+function entrar() {
+  const codigo = $('txtCodigo').value.trim().toUpperCase();
+  if (codigo.length !== 6) { aviso('El código son 6 letras. Miralo en el celular que filma.'); return; }
+  aviso('');
+  refSesion = db.ref('sesiones/' + codigo);
+
+  // online lo escribe el celular y lo borra al desconectarse: dice si sigue del otro lado.
+  refSesion.child('online').on('value', (snap) => {
+    if (snap.val() !== true && !estado) {
+      // Ni online ni estado: o el codigo esta mal, o el celular todavia no arranco.
+      $('conexion').textContent = 'Esperando al celular... (revisá el código)';
+      $('punto').classList.remove('ok');
+    }
+  });
+
+  refSesion.child('estado').on('value', (snap) => {
+    const e = snap.val();
+    if (!e) return;
+    listo = true;
+    estado = e;
+    $('entrada').hidden = true;
+    $('control').hidden = false;
+    pintar();
+  });
+}
+
+function pintar() {
+  const e = estado;
+  $('punto').classList.add('ok');
+  $('conexion').textContent = e.transmitiendo ? 'En vivo' : 'Conectado';
+  $('nomLocal').textContent = e.local.nombre;
+  $('nomVisita').textContent = e.visita.nombre;
+  $('tantosLocal').textContent = e.local.tantos;
+  $('tantosVisita').textContent = e.visita.tantos;
+  colores('colLocal', e.local);
+  colores('colVisita', e.visita);
+  const r = $('reloj'), f = $('fase');
+  if (e.fase === 'juego') {
+    r.firstChild.textContent = e.reloj;
+    f.textContent = `${e.tiempo}T de ${e.tiempos}`;
+    $('btnReloj').textContent = e.corriendo ? 'PAUSA' : (e.completo ? 'INICIAR' : 'SEGUIR');
+  } else if (e.fase === 'entretiempo') {
+    r.firstChild.textContent = e.relojEspera || '00:00';
+    f.textContent = 'ENTRETIEMPO';
+    $('btnReloj').textContent = `EMPEZAR ${e.tiempo + 1}T`;
+  } else {
+    r.firstChild.textContent = 'FINAL';
+    f.textContent = '';
+    $('btnReloj').textContent = 'FINAL';
+  }
+  $('btnEspera').textContent = e.espera === 'ninguna' ? 'PANTALLA' : 'CAMARA';
+  $('btnBanner').textContent = e.banner ? 'BANNER PUESTO' : 'BANNER';
+}
+
+function colores(id, eq) {
+  const d = $(id).children;
+  d[0].style.background = eq.color1;
+  d[1].style.background = eq.color2;
+}
+
+// Cada comando se agrega a la cola: el celular los va tomando, ejecutando y borrando.
+function mandar(m) {
+  if (!listo || !refSesion) return;
+  if (m.cmd === 'reloj' && estado && estado.fase === 'entretiempo') m = { cmd: 'siguienteTiempo' };
+  refSesion.child('comandos').push({ ...m, ts: firebase.database.ServerValue.TIMESTAMP });
+}
+
+function gol(local, delta) { mandar({ cmd: 'gol', local, delta }); }
+function espera() { mandar({ cmd: 'espera', mostrar: estado.espera === 'ninguna' }); }
+
+function abrirAjuste() {
+  if (estado && estado.fase === 'juego') {
+    const [m, s] = estado.reloj.split(':');
+    $('txtMin').value = parseInt(m, 10);
+    $('txtSeg').value = parseInt(s, 10);
+  }
+  $('dlgAjuste').showModal();
+}
+
+function ponerReloj() {
+  const minutos = parseInt($('txtMin').value, 10);
+  const segundos = parseInt($('txtSeg').value, 10);
+  if (isNaN(minutos) || isNaN(segundos) || segundos > 59) {
+    aviso('Poné los minutos y los segundos (los segundos, hasta 59).');
+    return;
+  }
+  mandar({ cmd: 'ponerReloj', minutos, segundos });
+  $('dlgAjuste').close();
+}
+
+function abrirBanner() {
+  $('txtBanner').value = estado ? estado.banner : '';
+  $('dlgBanner').showModal();
+}
+function mandarBanner(t) {
+  mandar({ cmd: 'banner', texto: t });
+  $('dlgBanner').close();
+}
+</script>
+</body>
+</html>
