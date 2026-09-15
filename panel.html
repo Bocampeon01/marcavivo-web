@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MarcaVivo - Panel del canal</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0D1117; color: #E6EDF3; line-height: 1.5;
+         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { background: #0D2B4E; padding: 14px 18px; }
+  h1 { margin: 0; font-size: 20px; }
+  h1 span { color: #FFC107; }
+  main { padding: 18px; max-width: 1200px; margin: 0 auto; }
+  h2 { font-size: 16px; margin: 26px 0 8px; border-bottom: 1px solid #263141; padding-bottom: 6px; }
+  button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+           border: 1px solid #2F81F7; background: #1F6FEB; color: #fff; }
+  button.suave { background: transparent; color: #58A6FF; }
+  button:disabled { opacity: .5; cursor: default; }
+  .aviso { background: #161B22; border-left: 4px solid #FFC107; padding: 10px 14px; margin: 14px 0;
+           border-radius: 4px; font-size: 14px; }
+  .error { background: #2D1618; border-left-color: #F85149; }
+  .tabla { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid #263141; padding: 6px 8px; text-align: left; vertical-align: top;
+           white-space: nowrap; }
+  th { color: #8B949E; font-weight: 600; }
+  td.ancho { white-space: normal; min-width: 220px; }
+  .id { font-family: Consolas, monospace; font-size: 11px; color: #8B949E; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+         font-weight: 700; }
+  .auto { background: #4A2E00; color: #FFC107; }
+  .fija { background: #0A3069; color: #79C0FF; }
+  .vivo { background: #4A1013; color: #FF7B72; }
+  .ok { color: #3FB950; }
+  .no { color: #8B949E; }
+  footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header><h1>MarcaVivo <span>· panel del canal</span></h1></header>
+
+<main>
+  <div id="entrada">
+    <p>Entrá con la cuenta de YouTube del club para ver todas las transmisiones y todas las claves
+       del canal.</p>
+    <button id="btnEntrar">ENTRAR CON GOOGLE</button>
+    <div class="aviso">
+      Esta página solo <strong>mira</strong>: no borra ni cambia nada. El permiso queda en esta
+      pestaña y se pierde al cerrarla; no se guarda nada en la computadora.
+    </div>
+  </div>
+
+  <div id="mensaje"></div>
+
+  <div id="datos" hidden>
+    <p>
+      <button id="btnActualizar" class="suave">ACTUALIZAR</button>
+      <button id="btnCopiar" class="suave">COPIAR TODO</button>
+    </p>
+
+    <h2 id="tituloTransmisiones">Transmisiones</h2>
+    <div class="tabla"><table id="tablaTransmisiones"></table></div>
+
+    <h2 id="tituloClaves">Claves de transmisión</h2>
+    <div class="tabla"><table id="tablaClaves"></table></div>
+  </div>
+</main>
+
+<footer>MarcaVivo — Handball All Boys</footer>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+// El ID de cliente OAuth no es secreto: identifica a la app ante Google. El mismo que usa
+// la app de Android como serverClientId.
+const CLIENT_ID = '500924512787-5lbgk6c3ig7g75ibm7fbqsea5n3c7l2i.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/youtube';
+const API = 'https://www.googleapis.com/youtube/v3';
+
+let token = null;
+let datos = { transmisiones: [], claves: [], canal: '' };
+
+const $ = (id) => document.getElementById(id);
+
+function avisar(texto, esError) {
+  $('mensaje').innerHTML = texto
+    ? '<div class="aviso' + (esError ? ' error' : '') + '">' + escapar(texto) + '</div>'
+    : '';
+}
+
+function escapar(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+$('btnEntrar').onclick = () => {
+  if (!window.google) return avisar('Todavía no cargó Google. Esperá unos segundos y probá de nuevo.', true);
+  google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: (r) => {
+      if (r.error) return avisar('No se pudo entrar: ' + r.error, true);
+      token = r.access_token;
+      $('entrada').hidden = true;
+      cargar();
+    },
+  }).requestAccessToken();
+};
+
+$('btnActualizar').onclick = cargar;
+
+// Trae TODAS las páginas: la consulta devuelve de a 50 y el canal tiene más.
+async function pedirTodo(recurso, params) {
+  const items = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ ...params, maxResults: '50' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const r = await fetch(API + '/' + recurso + '?' + query, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      const e = j.error || {};
+      throw new Error(recurso + ': ' + r.status + ' ' + (e.message || ''));
+    }
+    items.push(...(j.items || []));
+    pageToken = j.nextPageToken || '';
+  } while (pageToken);
+  return items;
+}
+
+async function cargar() {
+  avisar('Leyendo el canal, esperá...');
+  $('btnActualizar').disabled = true;
+  try {
+    const canal = await pedirTodo('channels', { part: 'snippet', mine: 'true' });
+    datos.canal = canal[0]?.snippet?.title || '';
+    datos.transmisiones = await pedirTodo('liveBroadcasts', {
+      part: 'snippet,contentDetails,status',
+      broadcastStatus: 'all',
+      broadcastType: 'all',
+    });
+    // contentDetails en liveStreams devuelve 500 en esta cuenta; snippet trae isDefaultStream,
+    // que es lo que hace falta para reconocer la clave fija del canal.
+    datos.claves = await pedirTodo('liveStreams', { part: 'id,snippet,status', mine: 'true' });
+    pintar();
+    avisar('');
+  } catch (e) {
+    avisar(String(e.message || e), true);
+  } finally {
+    $('btnActualizar').disabled = false;
+  }
+}
+
+function fecha(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  const dos = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()) +
+         ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
+}
+
+const EN_CURSO = ['live', 'liveStarting', 'testing', 'testStarting'];
+
+function pintar() {
+  const t = datos.transmisiones.map((b) => {
+    const s = b.snippet || {}, st = b.status || {}, cd = b.contentDetails || {};
+    return {
+      id: b.id,
+      titulo: s.title || '(sin titulo)',
+      automatica: s.isDefaultBroadcast === true,
+      estado: st.lifeCycleStatus || '',
+      privacidad: st.privacyStatus || '',
+      programada: s.scheduledStartTime || '',
+      salioAlAire: s.actualStartTime || '',
+      clave: cd.boundStreamId || '',
+    };
+  });
+  const autos = t.filter((x) => x.automatica).length;
+  $('tituloTransmisiones').textContent =
+    'Transmisiones (' + t.length + (autos ? ', ' + autos + ' automáticas' : '') + ')';
+  $('tablaTransmisiones').innerHTML =
+    '<tr><th>Título</th><th>Estado</th><th>Programada</th><th>Salió al aire</th>' +
+    '<th>Privacidad</th><th>Clave</th><th>Id</th></tr>' +
+    t.map((x) => '<tr>' +
+      '<td class="ancho">' + escapar(x.titulo) +
+        (x.automatica ? ' <span class="tag auto">AUTOMÁTICA</span>' : '') + '</td>' +
+      '<td>' + (EN_CURSO.includes(x.estado)
+        ? '<span class="tag vivo">' + escapar(x.estado) + '</span>'
+        : escapar(x.estado)) + '</td>' +
+      '<td>' + fecha(x.programada) + '</td>' +
+      '<td>' + (x.salioAlAire ? fecha(x.salioAlAire) : '<span class="no">nunca</span>') + '</td>' +
+      '<td>' + escapar(x.privacidad) + '</td>' +
+      '<td class="id">' + (x.clave ? escapar(x.clave) : '—') + '</td>' +
+      '<td class="id">' + escapar(x.id) + '</td>' +
+      '</tr>').join('');
+
+  // Una clave esta en uso si alguna transmision que todavia no termino la tiene asignada.
+  const enUso = new Set(datos.transmisiones
+    .filter((b) => (b.status || {}).lifeCycleStatus !== 'complete')
+    .map((b) => (b.contentDetails || {}).boundStreamId)
+    .filter(Boolean));
+
+  const c = datos.claves.map((s) => ({
+    id: s.id,
+    titulo: s.snippet?.title || '',
+    fija: s.snippet?.isDefaultStream === true,
+    creada: s.snippet?.publishedAt || '',
+    estado: s.status?.streamStatus || '',
+    enUso: enUso.has(s.id),
+  }));
+  const sueltas = c.filter((x) => !x.fija && !x.enUso && x.estado !== 'active').length;
+  $('tituloClaves').textContent =
+    'Claves de transmisión (' + c.length + ', ' + sueltas + ' sin usar)';
+  $('tablaClaves').innerHTML =
+    '<tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>En uso</th><th>Id</th></tr>' +
+    c.map((x) => '<tr>' +
+      '<td class="ancho">' + escapar(x.titulo || '(sin nombre)') +
+        (x.fija ? ' <span class="tag fija">FIJA DEL CANAL</span>' : '') + '</td>' +
+      '<td>' + fecha(x.creada) + '</td>' +
+      '<td>' + escapar(x.estado) + '</td>' +
+      '<td>' + (x.enUso ? '<span class="ok">sí</span>' : '<span class="no">no</span>') + '</td>' +
+      '<td class="id">' + escapar(x.id) + '</td>' +
+      '</tr>').join('');
+
+  $('datos').hidden = false;
+  datos.texto = resumen(t, c);
+}
+
+// Texto plano para pegar en el chat. No incluye la clave de transmision ni la direccion de
+// ingest: son secretas y no se piden a la API.
+function resumen(t, c) {
+  const lineas = [
+    'MarcaVivo panel - ' + fecha(new Date().toISOString()),
+    'Canal: ' + datos.canal,
+    '',
+    'TRANSMISIONES (' + t.length + ')',
+  ];
+  for (const x of t) {
+    lineas.push('- "' + x.titulo + '"');
+    lineas.push('  id=' + x.id + ' automatica=' + x.automatica);
+    lineas.push('  estado=' + x.estado + ' privacidad=' + x.privacidad);
+    lineas.push('  programada=' + fecha(x.programada) +
+                ' salioAlAire=' + (x.salioAlAire ? fecha(x.salioAlAire) : 'nunca'));
+    lineas.push('  boundStreamId=' + (x.clave || '(ninguna)'));
+  }
+  lineas.push('', 'CLAVES (' + c.length + ')');
+  for (const x of c) {
+    lineas.push('- id=' + x.id + ' fija=' + x.fija + ' estado=' + x.estado +
+                ' enUso=' + x.enUso + ' creada=' + fecha(x.creada) + ' "' + x.titulo + '"');
+  }
+  return lineas.join('\n');
+}
+
+$('btnCopiar').onclick = async () => {
+  await navigator.clipboard.writeText(datos.texto || '');
+  avisar('Copiado. Pegalo en el chat.');
+};
+</script>
+</body>
+</html>
