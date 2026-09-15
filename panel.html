@@ -17,7 +17,15 @@
   button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 16px; cursor: pointer;
            border: 1px solid #2F81F7; background: #1F6FEB; color: #fff; }
   button.suave { background: transparent; color: #58A6FF; }
+  button.peligro { background: #B62324; border-color: #F85149; }
   button:disabled { opacity: .5; cursor: default; }
+  .acciones { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: #F85149; }
+  input[type=checkbox]:disabled { accent-color: #30363D; }
+  dialog { background: #161B22; color: #E6EDF3; border: 1px solid #30363D; border-radius: 10px;
+           max-width: 520px; padding: 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  dialog ul { max-height: 240px; overflow-y: auto; font-size: 13px; padding-left: 18px; }
   .aviso { background: #161B22; border-left: 4px solid #FFC107; padding: 10px 14px; margin: 14px 0;
            border-radius: 4px; font-size: 14px; }
   .error { background: #2D1618; border-left-color: #F85149; }
@@ -48,8 +56,9 @@
        del canal.</p>
     <button id="btnEntrar">ENTRAR CON GOOGLE</button>
     <div class="aviso">
-      Esta página solo <strong>mira</strong>: no borra ni cambia nada. El permiso queda en esta
-      pestaña y se pierde al cerrarla; no se guarda nada en la computadora.
+      Desde acá se pueden <strong>borrar</strong> transmisiones que nunca salieron al aire y claves
+      viejas. Nada se borra sin confirmar antes, y lo que tiene video grabado no se puede tocar.
+      El permiso queda en esta pestaña y se pierde al cerrarla.
     </div>
   </div>
 
@@ -62,12 +71,38 @@
     </p>
 
     <h2 id="tituloTransmisiones">Transmisiones</h2>
+    <p class="acciones">
+      <button class="suave" data-marcar="transmisiones">MARCAR LAS QUE SE PUEDEN BORRAR</button>
+      <button class="peligro" data-borrar="transmisiones" disabled>BORRAR SELECCIONADAS</button>
+    </p>
+    <div class="aviso">
+      Solo se pueden marcar las que <strong>nunca salieron al aire</strong>. Las que grabaron algo
+      tienen la casilla bloqueada: borrarlas borraría el video.
+    </div>
     <div class="tabla"><table id="tablaTransmisiones"></table></div>
 
     <h2 id="tituloClaves">Claves de transmisión</h2>
+    <p class="acciones">
+      <button class="suave" data-marcar="claves">MARCAR LAS QUE SE PUEDEN BORRAR</button>
+      <button class="peligro" data-borrar="claves" disabled>BORRAR SELECCIONADAS</button>
+    </p>
+    <div class="aviso">
+      Borrar una clave <strong>no borra ningún video</strong>: los partidos grabados quedan intactos.
+      Quedan bloqueadas la del canal (<em>Default stream key</em>) y las que estén en uso.
+    </div>
     <div class="tabla"><table id="tablaClaves"></table></div>
   </div>
 </main>
+
+<dialog id="confirmar">
+  <h3 id="confirmarTitulo"></h3>
+  <p id="confirmarTexto"></p>
+  <ul id="confirmarLista"></ul>
+  <p class="acciones">
+    <button class="suave" id="btnCancelar">CANCELAR</button>
+    <button class="peligro" id="btnConfirmar"></button>
+  </p>
+</dialog>
 
 <footer>MarcaVivo — Handball All Boys</footer>
 
@@ -165,27 +200,42 @@ function fecha(s) {
 
 const EN_CURSO = ['live', 'liveStarting', 'testing', 'testStarting'];
 
+// La clave que YouTube crea con el canal se llama asi. El campo isDefaultStream que deberia
+// marcarla esta deprecado desde 2020 y hoy siempre viene en false, asi que no sirve.
+const CLAVE_DEL_CANAL = /^default stream key/i;
+
+function casilla(tipo, x) {
+  return '<td><input type="checkbox" data-tipo="' + tipo + '" value="' + escapar(x.id) + '"' +
+         (x.borrable ? '' : ' disabled title="' + escapar(x.motivo) + '"') + '></td>';
+}
+
 function pintar() {
   const t = datos.transmisiones.map((b) => {
     const s = b.snippet || {}, st = b.status || {}, cd = b.contentDetails || {};
+    const estado = st.lifeCycleStatus || '';
+    const salioAlAire = s.actualStartTime || '';
+    // Sin fecha de inicio real y todavia sin empezar: no grabo nada, no hay video que perder.
+    const borrable = !salioAlAire && ['created', 'ready'].includes(estado);
     return {
       id: b.id,
       titulo: s.title || '(sin titulo)',
       automatica: s.isDefaultBroadcast === true,
-      estado: st.lifeCycleStatus || '',
+      estado,
       privacidad: st.privacyStatus || '',
       programada: s.scheduledStartTime || '',
-      salioAlAire: s.actualStartTime || '',
+      salioAlAire,
       clave: cd.boundStreamId || '',
+      borrable,
+      motivo: borrable ? '' : 'Salió al aire: borrarla borraría el video',
     };
   });
-  const autos = t.filter((x) => x.automatica).length;
+  datos.t = t;
   $('tituloTransmisiones').textContent =
-    'Transmisiones (' + t.length + (autos ? ', ' + autos + ' automáticas' : '') + ')';
+    'Transmisiones (' + t.length + ', ' + t.filter((x) => x.borrable).length + ' sin video)';
   $('tablaTransmisiones').innerHTML =
-    '<tr><th>Título</th><th>Estado</th><th>Programada</th><th>Salió al aire</th>' +
+    '<tr><th></th><th>Título</th><th>Estado</th><th>Programada</th><th>Salió al aire</th>' +
     '<th>Privacidad</th><th>Clave</th><th>Id</th></tr>' +
-    t.map((x) => '<tr>' +
+    t.map((x) => '<tr>' + casilla('transmisiones', x) +
       '<td class="ancho">' + escapar(x.titulo) +
         (x.automatica ? ' <span class="tag auto">AUTOMÁTICA</span>' : '') + '</td>' +
       '<td>' + (EN_CURSO.includes(x.estado)
@@ -204,22 +254,30 @@ function pintar() {
     .map((b) => (b.contentDetails || {}).boundStreamId)
     .filter(Boolean));
 
-  const c = datos.claves.map((s) => ({
-    id: s.id,
-    titulo: s.snippet?.title || '',
-    fija: s.snippet?.isDefaultStream === true,
-    creada: s.snippet?.publishedAt || '',
-    estado: s.status?.streamStatus || '',
-    enUso: enUso.has(s.id),
-  }));
-  const sueltas = c.filter((x) => !x.fija && !x.enUso && x.estado !== 'active').length;
+  const c = datos.claves.map((s) => {
+    const titulo = s.snippet?.title || '';
+    const estado = s.status?.streamStatus || '';
+    const fija = s.snippet?.isDefaultStream === true || CLAVE_DEL_CANAL.test(titulo);
+    const usada = enUso.has(s.id);
+    return {
+      id: s.id,
+      titulo,
+      fija,
+      creada: s.snippet?.publishedAt || '',
+      estado,
+      enUso: usada,
+      borrable: !fija && !usada && estado !== 'active',
+      motivo: fija ? 'Es la clave del canal' : usada ? 'La usa una transmisión' : 'Está activa',
+    };
+  });
+  datos.c = c;
   $('tituloClaves').textContent =
-    'Claves de transmisión (' + c.length + ', ' + sueltas + ' sin usar)';
+    'Claves de transmisión (' + c.length + ', ' + c.filter((x) => x.borrable).length + ' sin usar)';
   $('tablaClaves').innerHTML =
-    '<tr><th>Nombre</th><th>Creada</th><th>Estado</th><th>En uso</th><th>Id</th></tr>' +
-    c.map((x) => '<tr>' +
+    '<tr><th></th><th>Nombre</th><th>Creada</th><th>Estado</th><th>En uso</th><th>Id</th></tr>' +
+    c.map((x) => '<tr>' + casilla('claves', x) +
       '<td class="ancho">' + escapar(x.titulo || '(sin nombre)') +
-        (x.fija ? ' <span class="tag fija">FIJA DEL CANAL</span>' : '') + '</td>' +
+        (x.fija ? ' <span class="tag fija">DEL CANAL</span>' : '') + '</td>' +
       '<td>' + fecha(x.creada) + '</td>' +
       '<td>' + escapar(x.estado) + '</td>' +
       '<td>' + (x.enUso ? '<span class="ok">sí</span>' : '<span class="no">no</span>') + '</td>' +
@@ -228,6 +286,7 @@ function pintar() {
 
   $('datos').hidden = false;
   datos.texto = resumen(t, c);
+  for (const tipo of ['transmisiones', 'claves']) contar(tipo);
 }
 
 // Texto plano para pegar en el chat. No incluye la clave de transmision ni la direccion de
@@ -259,6 +318,103 @@ $('btnCopiar').onclick = async () => {
   await navigator.clipboard.writeText(datos.texto || '');
   avisar('Copiado. Pegalo en el chat.');
 };
+
+// ---- Borrado -------------------------------------------------------------------------
+// Nada se borra sin pasar por el cuadro de confirmacion, que dice exactamente que se va.
+
+const RECURSO = { transmisiones: 'liveBroadcasts', claves: 'liveStreams' };
+
+const casillas = (tipo) =>
+  [...document.querySelectorAll('input[data-tipo="' + tipo + '"]')];
+
+const elegidas = (tipo) => casillas(tipo).filter((e) => e.checked).map((e) => e.value);
+
+function contar(tipo) {
+  const cuantas = elegidas(tipo).length;
+  const boton = document.querySelector('button[data-borrar="' + tipo + '"]');
+  boton.disabled = cuantas === 0;
+  boton.textContent = cuantas ? 'BORRAR ' + cuantas : 'BORRAR SELECCIONADAS';
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target.dataset?.tipo) contar(e.target.dataset.tipo);
+});
+
+for (const boton of document.querySelectorAll('button[data-marcar]')) {
+  boton.onclick = () => {
+    const tipo = boton.dataset.marcar;
+    // Las bloqueadas estan deshabilitadas, asi que esto marca solo las que se pueden borrar.
+    const faltan = casillas(tipo).some((e) => !e.disabled && !e.checked);
+    for (const e of casillas(tipo)) if (!e.disabled) e.checked = faltan;
+    contar(tipo);
+  };
+}
+
+for (const boton of document.querySelectorAll('button[data-borrar]')) {
+  boton.onclick = () => pedirConfirmacion(boton.dataset.borrar);
+}
+
+function pedirConfirmacion(tipo) {
+  const ids = elegidas(tipo);
+  if (!ids.length) return;
+  const lista = datos[tipo === 'transmisiones' ? 't' : 'c'];
+  const nombre = (id) => {
+    const x = lista.find((y) => y.id === id);
+    return x ? (x.titulo || '(sin nombre)') : id;
+  };
+  const una = ids.length === 1;
+  $('confirmarTitulo').textContent = 'Borrar ' + ids.length + ' ' +
+    (tipo === 'transmisiones' ? (una ? 'transmisión' : 'transmisiones') : (una ? 'clave' : 'claves'));
+  $('confirmarTexto').textContent = tipo === 'transmisiones'
+    ? (una ? 'No salió al aire, así que no se pierde ningún video. No se puede deshacer.'
+           : 'Ninguna salió al aire, así que no se pierde ningún video. No se puede deshacer.')
+    : 'Los videos ya grabados no se tocan. No se puede deshacer.';
+  $('confirmarLista').innerHTML =
+    ids.slice(0, 40).map((id) => '<li>' + escapar(nombre(id)) + '</li>').join('') +
+    (ids.length > 40 ? '<li>… y ' + (ids.length - 40) + ' más</li>' : '');
+  $('btnConfirmar').textContent = 'BORRAR ' + ids.length;
+  $('btnConfirmar').onclick = () => {
+    $('confirmar').close();
+    borrar(tipo, ids);
+  };
+  $('confirmar').showModal();
+}
+
+$('btnCancelar').onclick = () => $('confirmar').close();
+
+async function borrar(tipo, ids) {
+  let listos = 0;
+  const fallados = [];
+  for (const id of ids) {
+    avisar('Borrando ' + (listos + 1) + ' de ' + ids.length + '...');
+    try {
+      const r = await fetch(API + '/' + RECURSO[tipo] + '?id=' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      // El 404 es una que ya no estaba: para lo que queremos, es lo mismo que borrada.
+      if (!r.ok && r.status !== 404) {
+        const j = await r.json().catch(() => ({}));
+        const mensaje = j.error?.message || r.status;
+        // La cuota diaria de YouTube se agota: cada borrado cuesta 50 unidades de 10000.
+        if (String(mensaje).includes('quota')) {
+          avisar('Se acabó la cuota diaria de YouTube. Van ' + listos + ' borradas; seguí mañana.',
+                 true);
+          await cargar();
+          return;
+        }
+        throw new Error(mensaje);
+      }
+      listos++;
+    } catch (e) {
+      fallados.push(id + ': ' + (e.message || e));
+    }
+  }
+  await cargar();
+  avisar(fallados.length
+    ? 'Se borraron ' + listos + '. No se pudo con ' + fallados.length + ': ' + fallados[0]
+    : 'Listo: se borraron ' + listos + '.', fallados.length > 0);
+}
 </script>
 </body>
 </html>
