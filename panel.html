@@ -73,6 +73,7 @@
     <h2 id="tituloTransmisiones">Transmisiones</h2>
     <p class="acciones">
       <button class="suave" data-marcar="transmisiones">MARCAR LAS QUE SE PUEDEN BORRAR</button>
+      <button class="suave" id="btnCrudo" disabled>COPIAR CRUDO</button>
       <button class="peligro" data-borrar="transmisiones" disabled>BORRAR SELECCIONADAS</button>
     </p>
     <div class="aviso">
@@ -334,7 +335,19 @@ function contar(tipo) {
   const boton = document.querySelector('button[data-borrar="' + tipo + '"]');
   boton.disabled = cuantas === 0;
   boton.textContent = cuantas ? 'BORRAR ' + cuantas : 'BORRAR SELECCIONADAS';
+  if (tipo === 'transmisiones') $('btnCrudo').disabled = cuantas === 0;
 }
+
+// Copia el JSON completo, tal como lo devuelve YouTube, de las que estan tildadas. Sirve
+// para comparar campo por campo la que crea YouTube sola contra una programada a mano:
+// los campos que deberian distinguirlas (isDefaultBroadcast) estan deprecados y vienen
+// siempre en false, asi que hay que buscar la diferencia en el resto.
+$('btnCrudo').onclick = async () => {
+  const ids = new Set(elegidas('transmisiones'));
+  const crudo = datos.transmisiones.filter((b) => ids.has(b.id));
+  await navigator.clipboard.writeText(JSON.stringify(crudo, null, 2));
+  avisar('Copiadas ' + crudo.length + ' en crudo. Pegalo en el chat.');
+};
 
 document.addEventListener('change', (e) => {
   if (e.target.dataset?.tipo) contar(e.target.dataset.tipo);
