@@ -49,6 +49,18 @@
   .aviso { background: #3a2a00; border: 1px solid #ffc10755; padding: 10px; border-radius: 10px;
            font-size: 14px; margin-bottom: 10px; }
   .ayuda { color: #98a2b3; font-size: 14px; line-height: 1.5; }
+  .tiempos { display: flex; gap: 8px; margin: 4px 0 2px; }
+  .pill { flex: 0 0 auto; padding: 8px 16px; font-weight: 700; }
+  .pill.activo { background: #1565c0; border-color: #1565c0; color: #fff; }
+  .pill:disabled { opacity: .5; }
+  .excl-tit { color: #98a2b3; font-size: 12px; letter-spacing: 1px; margin: 14px 0 6px; }
+  .excl { display: flex; gap: 8px; }
+  .excl .casilla { flex: 1; padding: 12px 4px; display: flex; align-items: center;
+                   justify-content: center; gap: 5px; }
+  .excl .casilla.ocupada { border-color: #ffc107; font-weight: 700; }
+  .barra { display: inline-block; width: 6px; height: 20px; border-radius: 2px; flex: none; }
+  .menu { display: flex; flex-direction: column; gap: 8px; }
+  .menu button { text-align: left; display: flex; align-items: center; gap: 10px; }
 </style>
 </head>
 <body>
@@ -90,6 +102,7 @@
       </div>
     </div>
 
+    <div class="tiempos" id="tiempos"></div>
     <div class="reloj" id="reloj">--:--<small id="fase">&nbsp;</small></div>
 
     <div class="acciones">
@@ -98,6 +111,9 @@
       <button id="btnEspera" onclick="espera()">PANTALLA</button>
       <button class="ancho" id="btnBanner" onclick="abrirBanner()">BANNER</button>
     </div>
+
+    <div class="excl-tit">EXCLUSIONES</div>
+    <div class="excl" id="excl"></div>
   </section>
 </main>
 
@@ -133,6 +149,24 @@
     <button onclick="dlgBanner.close()">CANCELAR</button>
     <button onclick="mandarBanner(txtBanner.value)">MOSTRAR</button>
   </div>
+</dialog>
+
+<dialog id="dlgPantalla">
+  <h3>Cuenta regresiva</h3>
+  <div class="menu">
+    <button onclick="pantalla(1)">1 minuto</button>
+    <button onclick="pantalla(5)">5 minutos</button>
+    <button onclick="pantalla(15)">15 minutos</button>
+    <button onclick="pantalla('otro')">Otro...</button>
+    <button onclick="pantalla(0)">Nada (sin cuenta)</button>
+    <button onclick="dlgPantalla.close()">CANCELAR</button>
+  </div>
+</dialog>
+
+<dialog id="dlgExcl">
+  <h3 id="dlgExclTit">Exclusión</h3>
+  <div class="menu" id="dlgExclBody"></div>
+  <div class="ajustes"><button onclick="dlgExcl.close()">CANCELAR</button></div>
 </dialog>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -218,6 +252,74 @@ function pintar() {
   }
   $('btnEspera').textContent = e.espera === 'ninguna' ? 'PANTALLA' : 'CAMARA';
   $('btnBanner').textContent = e.banner ? 'BANNER PUESTO' : 'BANNER';
+  pintarTiempos(e);
+  pintarExcl(e);
+}
+
+// Los tiempos se pueden elegir a mano (celeste el que se juega); no con el reloj corriendo.
+function pintarTiempos(e) {
+  const cont = $('tiempos');
+  cont.innerHTML = '';
+  for (let t = 1; t <= e.tiempos; t++) {
+    const b = document.createElement('button');
+    b.textContent = t + 'T';
+    b.className = 'pill' + (e.tiempo === t && e.fase !== 'fin' ? ' activo' : '');
+    b.disabled = e.corriendo;
+    b.onclick = () => mandar({ cmd: 'irATiempo', t });
+    cont.appendChild(b);
+  }
+}
+
+function mmss(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+
+// Casillas del cupo: tres de 2' y una de 4'. Vacia se elige el club; ocupada, se puede sacar.
+function pintarExcl(e) {
+  const cont = $('excl');
+  cont.innerHTML = '';
+  const lista = e.exclusiones || [];
+  const dos = lista.filter((x) => x.minutos === 2);
+  const cuatro = lista.filter((x) => x.minutos === 4);
+  const slot = (min, ex) => {
+    const b = document.createElement('button');
+    b.className = 'casilla' + (ex ? ' ocupada' : '');
+    if (ex) {
+      const col = ex.local ? e.local.color1 : e.visita.color1;
+      b.innerHTML = `<span class="barra" style="background:${col}"></span>${mmss(ex.segundos)}`;
+    } else {
+      b.textContent = min + "'";
+    }
+    b.onclick = () => menuExcl(min, ex);
+    cont.appendChild(b);
+  };
+  for (let i = 0; i < 3; i++) slot(2, dos[i] || null);
+  slot(4, cuatro[0] || null);
+}
+
+function menuExcl(min, ex) {
+  const e = estado;
+  $('dlgExclTit').textContent = 'Exclusión de ' + min + ' min';
+  const cont = $('dlgExclBody');
+  cont.innerHTML = '';
+  if (ex) {
+    const nom = (ex.local ? e.local : e.visita).nombre;
+    const info = document.createElement('div');
+    info.style.color = '#98a2b3';
+    info.textContent = 'Corre para ' + nom + ' · ' + mmss(ex.segundos);
+    cont.appendChild(info);
+    const b = document.createElement('button');
+    b.textContent = 'SACAR';
+    b.style.color = '#ff5252';
+    b.onclick = () => { mandar({ cmd: 'sacarExclusion', local: ex.local, minutos: min }); $('dlgExcl').close(); };
+    cont.appendChild(b);
+  } else {
+    [[e.local, true], [e.visita, false]].forEach(([eq, loc]) => {
+      const b = document.createElement('button');
+      b.innerHTML = `<span class="barra" style="background:${eq.color1}"></span>${eq.nombre}`;
+      b.onclick = () => { mandar({ cmd: 'excluir', local: loc, minutos: min }); $('dlgExcl').close(); };
+      cont.appendChild(b);
+    });
+  }
+  $('dlgExcl').showModal();
 }
 
 function colores(id, eq) {
@@ -234,7 +336,25 @@ function mandar(m) {
 }
 
 function gol(local, delta) { mandar({ cmd: 'gol', local, delta }); }
-function espera() { mandar({ cmd: 'espera', mostrar: estado.espera === 'ninguna' }); }
+
+// Con la pantalla puesta, el boton vuelve a la camara. Sin pantalla, abre el menu para
+// elegir cuanto dura la cuenta regresiva (o "Nada", la pantalla sin numero contando).
+function espera() {
+  if (estado.espera !== 'ninguna') { mandar({ cmd: 'espera', mostrar: false }); return; }
+  $('dlgPantalla').showModal();
+}
+function pantalla(min) {
+  $('dlgPantalla').close();
+  if (min === 'otro') {
+    const v = parseInt(prompt('¿Cuántos minutos? (1 a 99)', '10'), 10);
+    if (isNaN(v) || v < 1 || v > 99) return;
+    mandar({ cmd: 'espera', mostrar: true, minutos: v });
+  } else if (min === 0) {
+    mandar({ cmd: 'espera', mostrar: true }); // Nada: pantalla sin cuenta.
+  } else {
+    mandar({ cmd: 'espera', mostrar: true, minutos: min });
+  }
+}
 
 function abrirAjuste() {
   if (estado && estado.fase === 'juego') {
