@@ -3,23 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Preparar escudos y logos - MarcaVivo</title>
+<title>Preparar imágenes - MarcaVivo</title>
 <style>
-  :root { color-scheme: light dark; --tinta: #14181f; --fondo: #f6f7f9; --caja: #fff; --borde: #ccd2dc; }
+  :root { color-scheme: light dark; --tinta: #14181f; --fondo: #f6f7f9; --caja: #fff; --borde: #ccd2dc;
+          --suave: #5b6675; }
   @media (prefers-color-scheme: dark) {
-    :root { --tinta: #e7eaee; --fondo: #0b0e12; --caja: #12161c; --borde: #2a3440; }
+    :root { --tinta: #e7eaee; --fondo: #0b0e12; --caja: #12161c; --borde: #2a3440; --suave: #98a2b3; }
   }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          line-height: 1.6; color: var(--tinta); background: var(--fondo); }
   header { background: #0d2b4e; color: #fff; padding: 28px 20px; }
-  header div, main { max-width: 860px; margin: 0 auto; }
+  header div, main { max-width: 960px; margin: 0 auto; }
   h1 { margin: 0; font-size: 26px; }
   h2 { font-size: 19px; margin: 28px 0 8px; }
-  main { padding: 24px 20px 64px; }
+  main { padding: 24px 16px 64px; }
+  .modos { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 18px; }
+  .modos button { background: var(--caja); color: var(--tinta); border: 1px solid var(--borde); }
+  .modos button.activo { background: #ffc107; color: #412402; border-color: #ffc107; }
   .zona { border: 2px dashed var(--borde); border-radius: 12px; padding: 32px 20px; text-align: center;
           background: var(--caja); cursor: pointer; }
   .zona.encima { border-color: #ffc107; }
-  .opciones { display: flex; flex-wrap: wrap; gap: 20px; margin: 20px 0; align-items: center; }
+  .opciones { display: flex; flex-wrap: wrap; gap: 20px; margin: 18px 0; align-items: center; }
   label { display: flex; align-items: center; gap: 6px; }
   .previews { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 8px; }
   .tarjeta { background: var(--caja); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; }
@@ -32,39 +38,70 @@
              display: flex; align-items: center; justify-content: center; }
   .fondo-cancha { background: #3b6d11; border-radius: 10px; padding: 14px; }
   img.sale { max-width: 100%; max-height: 100%; display: block; }
+  .portada-vista { width: min(480px, 100%); aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
+                   background: #000; }
+  .portada-vista img { width: 100%; height: 100%; object-fit: cover; display: block; }
   button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--borde);
            background: #ffc107; color: #412402; font-weight: 600; cursor: pointer; }
+  button.chico { padding: 5px 12px; font-size: 13px; }
+  button.suave { background: transparent; color: var(--tinta); }
   button[disabled] { opacity: .5; cursor: default; }
-  .datos { font-size: 14px; opacity: .8; }
+  .datos { font-size: 14px; color: var(--suave); }
+  .grilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .item { background: var(--caja); border: 2px solid var(--borde); border-radius: 10px; padding: 10px;
+          cursor: pointer; }
+  .item.elegido { border-color: #ffc107; }
+  .item .muestra { height: 110px; border-radius: 6px; display: flex; align-items: center;
+                   justify-content: center; overflow: hidden;
+                   background: repeating-conic-gradient(#d7dce3 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+  .item.portada .muestra { background: #000; }
+  .item .muestra img { max-width: 100%; max-height: 100%; }
+  .item.portada .muestra img { width: 100%; height: 100%; object-fit: cover; }
+  .item .nombre { font-size: 13px; font-weight: 600; margin: 6px 0 0; word-break: break-all; }
+  .item .info { font-size: 12px; color: var(--suave); }
+  .item .fila { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; }
+  .barra { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
   a { color: #0d47a1; }
   @media (prefers-color-scheme: dark) { a { color: #8ab4f8; } }
 </style>
 </head>
 <body>
 <header><div>
-  <h1>Preparar escudos y logos</h1>
+  <h1>Preparar imágenes para MarcaVivo</h1>
 </div></header>
 <main>
-  <p>
-    Solta la imagen del club o del sponsor, y esta pagina la deja lista para MarcaVivo: le saca los
-    margenes de sobra y la guarda en el tamano justo que usa la app. Todo pasa en tu compu; la imagen
-    no se sube a ningun lado.
-  </p>
-
-  <div class="zona" id="zona">
-    <strong>Arrastra la imagen aca</strong><br>
-    <span class="datos">o toca para elegir un archivo (PNG, JPG o WEBP)</span>
-    <input type="file" id="archivo" accept="image/*" hidden>
+  <div class="modos">
+    <button id="modoLogos" class="activo">Escudos y logos</button>
+    <button id="modoPortada">Portada para YouTube</button>
   </div>
 
-  <div class="opciones">
-    <label><input type="checkbox" id="recortar" checked> Sacar los margenes de sobra</label>
+  <p id="explicacion"></p>
+
+  <div class="zona" id="zona">
+    <strong>Arrastrá las imágenes acá</strong><br>
+    <span class="datos">o tocá para elegirlas (una o varias a la vez; PNG, JPG o WEBP)</span>
+    <input type="file" id="archivo" accept="image/*" multiple hidden>
+  </div>
+
+  <div class="opciones" id="opcionesLogos">
+    <label><input type="checkbox" id="recortar" checked> Sacar los márgenes de sobra</label>
     <label><input type="checkbox" id="blanco"> Poner fondo blanco (para logos con transparencia)</label>
+  </div>
+  <div class="opciones" id="opcionesPortada" hidden>
+    <label><input type="radio" name="encuadre" value="llenar" checked> Llenar todo (recorta lo que sobra)</label>
+    <label><input type="radio" name="encuadre" value="entera"> Imagen entera (bordes con la misma foto desenfocada)</label>
   </div>
 
   <div id="resultado" hidden>
-    <h2>Como se va a ver</h2>
-    <div class="previews">
+    <div class="barra">
+      <strong id="cuantas"></strong>
+      <button id="bajarTodas">Descargar todas (ZIP)</button>
+      <button id="borrarTodas" class="suave">Empezar de nuevo</button>
+    </div>
+    <div class="grilla" id="grilla"></div>
+
+    <h2>Cómo se va a ver <span class="datos" id="cualVista"></span></h2>
+    <div class="previews" id="vistaLogos">
       <div class="tarjeta">
         <p>En el marcador (escudo del equipo)</p>
         <div class="fondo-cancha">
@@ -82,50 +119,95 @@
         </div>
       </div>
     </div>
-
-    <h2>Archivo listo</h2>
-    <p class="datos" id="datos"></p>
-    <button id="bajar">Descargar PNG</button>
+    <div class="previews" id="vistaPortada" hidden>
+      <div class="tarjeta">
+        <p>Portada de la transmisión en YouTube (1280 x 720)</p>
+        <div class="portada-vista"><img id="p3" alt=""></div>
+      </div>
+    </div>
   </div>
 
-  <h2>Como se usa en la app</h2>
+  <h2>Cómo se usa</h2>
   <ul>
-    <li><strong>Escudo de un equipo:</strong> en "Datos del partido", el recuadro que dice Escudo.</li>
-    <li><strong>Logo de sponsor:</strong> en "Datos del partido", boton LOGOS, y despues AGREGAR.</li>
+    <li><strong>Escudo de un equipo:</strong> en la app, "Datos del partido", el recuadro que dice Escudo.
+      Para las miniaturas de las programadas: PROGRAMAR → Fondos y escudos → Escudos.</li>
+    <li><strong>Logo de sponsor:</strong> en "Datos del partido", botón LOGOS, y después AGREGAR.</li>
+    <li><strong>Portada para YouTube:</strong> queda en 1280 x 720 (16:9), JPG de menos de 2 MB, lo que pide
+      YouTube. Sirve como miniatura de una programada y como foto de fondo de una categoría
+      (PROGRAMAR → Fondos y escudos → Fondos por categoría).</li>
   </ul>
-  <p class="datos"><a href="index.html">Volver a MarcaVivo</a></p>
+  <p class="datos">Todo pasa en tu compu: las imágenes no se suben a ningún lado.
+    <a href="index.html">Volver a MarcaVivo</a></p>
 </main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
-const LADO_MAXIMO = 1024;
-const zona = document.getElementById('zona');
-const entrada = document.getElementById('archivo');
-const recortar = document.getElementById('recortar');
-const blanco = document.getElementById('blanco');
-const resultado = document.getElementById('resultado');
-const datos = document.getElementById('datos');
-const bajar = document.getElementById('bajar');
-let ultimaImagen = null, ultimoNombre = 'logo', urlSalida = null;
+const LADO_MAXIMO = 1024;          // escudos y logos: el lado mas largo, como mucho
+const PORTADA_W = 1280, PORTADA_H = 720;
+const TOPE_PORTADA = 2 * 1024 * 1024;  // YouTube no acepta miniaturas de mas de 2 MB
+const $ = (id) => document.getElementById(id);
 
-zona.addEventListener('click', () => entrada.click());
-entrada.addEventListener('change', () => { if (entrada.files[0]) cargar(entrada.files[0]); });
+let modo = 'logos';
+let items = [];      // { nombre, img, blob, url, info }
+let elegido = 0;
+
+const TEXTOS = {
+  logos: 'Soltá las imágenes de los clubes o de los sponsors y esta página las deja listas para ' +
+         'MarcaVivo: les saca los márgenes de sobra y las guarda en el tamaño justo que usa la app.',
+  portada: 'Soltá las fotos y esta página las deja en el formato ideal para la portada (miniatura) ' +
+           'de una transmisión de YouTube: 1280 x 720, 16:9, JPG de menos de 2 MB.',
+};
+
+function cambiarModo(m) {
+  modo = m;
+  $('modoLogos').classList.toggle('activo', m === 'logos');
+  $('modoPortada').classList.toggle('activo', m === 'portada');
+  $('opcionesLogos').hidden = m !== 'logos';
+  $('opcionesPortada').hidden = m !== 'portada';
+  $('vistaLogos').hidden = m !== 'logos';
+  $('vistaPortada').hidden = m !== 'portada';
+  $('explicacion').textContent = TEXTOS[m];
+  procesarTodas();
+}
+$('modoLogos').onclick = () => cambiarModo('logos');
+$('modoPortada').onclick = () => cambiarModo('portada');
+
+const zona = $('zona');
+zona.addEventListener('click', () => $('archivo').click());
+$('archivo').addEventListener('change', () => { cargar($('archivo').files); $('archivo').value = ''; });
 ['dragenter', 'dragover'].forEach(e => zona.addEventListener(e, ev => {
   ev.preventDefault(); zona.classList.add('encima');
 }));
 ['dragleave', 'drop'].forEach(e => zona.addEventListener(e, ev => {
   ev.preventDefault(); zona.classList.remove('encima');
 }));
-zona.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) cargar(ev.dataTransfer.files[0]); });
-recortar.addEventListener('change', procesar);
-blanco.addEventListener('change', procesar);
+zona.addEventListener('drop', ev => cargar(ev.dataTransfer.files));
+[$('recortar'), $('blanco')].forEach(c => c.addEventListener('change', procesarTodas));
+document.querySelectorAll('input[name=encuadre]').forEach(r => r.addEventListener('change', procesarTodas));
 
-function cargar(archivo) {
-  if (!archivo.type.startsWith('image/')) { alert('Eso no es una imagen.'); return; }
-  ultimoNombre = archivo.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').toLowerCase();
-  const img = new Image();
-  img.onload = () => { ultimaImagen = img; procesar(); };
-  img.onerror = () => alert('No se pudo abrir la imagen.');
-  img.src = URL.createObjectURL(archivo);
+function abrir(archivo) {
+  return new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => ok(null);
+    img.src = URL.createObjectURL(archivo);
+  });
+}
+
+async function cargar(lista) {
+  const archivos = [...lista].filter(a => a.type.startsWith('image/'));
+  if (!archivos.length) { alert('No hay imágenes en lo que elegiste.'); return; }
+  const malos = [];
+  for (const a of archivos) {
+    const img = await abrir(a);
+    if (!img) { malos.push(a.name); continue; }
+    items.push({
+      nombre: a.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').toLowerCase() || 'imagen',
+      img,
+    });
+  }
+  if (malos.length) alert('No se pudieron abrir: ' + malos.join(', '));
+  await procesarTodas();
 }
 
 // Busca hasta donde llega el dibujo: descarta los bordes del color de las esquinas.
@@ -154,15 +236,15 @@ function limites(datosImg, ancho, alto) {
   };
 }
 
-function procesar() {
-  if (!ultimaImagen) return;
-  const img = ultimaImagen;
+const aBlob = (canvas, tipo, calidad) => new Promise(ok => canvas.toBlob(ok, tipo, calidad));
+
+async function prepararLogo(img) {
   const medida = document.createElement('canvas');
   medida.width = img.naturalWidth; medida.height = img.naturalHeight;
   const mc = medida.getContext('2d', { willReadFrequently: true });
   mc.drawImage(img, 0, 0);
   let corte = { x: 0, y: 0, w: medida.width, h: medida.height };
-  if (recortar.checked) {
+  if ($('recortar').checked) {
     try { corte = limites(mc.getImageData(0, 0, medida.width, medida.height), medida.width, medida.height); }
     catch (e) { /* imagen de otro origen: se deja entera */ }
   }
@@ -172,27 +254,133 @@ function procesar() {
   salida.height = Math.max(1, Math.round(corte.h * escala));
   const sc = salida.getContext('2d');
   sc.imageSmoothingQuality = 'high';
-  if (blanco.checked) { sc.fillStyle = '#fff'; sc.fillRect(0, 0, salida.width, salida.height); }
+  if ($('blanco').checked) { sc.fillStyle = '#fff'; sc.fillRect(0, 0, salida.width, salida.height); }
   sc.drawImage(img, corte.x, corte.y, corte.w, corte.h, 0, 0, salida.width, salida.height);
-
-  salida.toBlob(blob => {
-    if (urlSalida) URL.revokeObjectURL(urlSalida);
-    urlSalida = URL.createObjectURL(blob);
-    document.getElementById('p1').src = urlSalida;
-    document.getElementById('p2').src = urlSalida;
-    datos.textContent = `${salida.width} x ${salida.height} px, ${Math.round(blob.size / 1024)} KB` +
-      (escala < 1 ? ' (achicada para la app)' : '');
-    resultado.hidden = false;
-  }, 'image/png');
+  const blob = await aBlob(salida, 'image/png');
+  return { blob, ext: 'png', sufijo: '_marcavivo',
+           info: `${salida.width} x ${salida.height} px, ${Math.round(blob.size / 1024)} KB` +
+                 (escala < 1 ? ' (achicada)' : '') };
 }
 
-bajar.addEventListener('click', () => {
-  if (!urlSalida) return;
+// Portada de YouTube: 1280x720, JPG de menos de 2 MB.
+async function prepararPortada(img) {
+  const c = document.createElement('canvas');
+  c.width = PORTADA_W; c.height = PORTADA_H;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const entera = document.querySelector('input[name=encuadre]:checked').value === 'entera';
+  // Llenar: cubre todo recortando lo que sobra (centrado).
+  const cubrir = () => {
+    const e = Math.max(PORTADA_W / w, PORTADA_H / h);
+    const aw = PORTADA_W / e, ah = PORTADA_H / e;
+    ctx.drawImage(img, (w - aw) / 2, (h - ah) / 2, aw, ah, 0, 0, PORTADA_W, PORTADA_H);
+  };
+  if (entera) {
+    // De fondo, la misma foto agrandada y desenfocada; encima, la foto entera.
+    ctx.save();
+    ctx.filter = 'blur(28px) brightness(.6)';
+    cubrir();
+    ctx.restore();
+    const e = Math.min(PORTADA_W / w, PORTADA_H / h);
+    const dw = w * e, dh = h * e;
+    ctx.drawImage(img, (PORTADA_W - dw) / 2, (PORTADA_H - dh) / 2, dw, dh);
+  } else {
+    cubrir();
+  }
+  let calidad = 0.92, blob = await aBlob(c, 'image/jpeg', calidad);
+  while (blob.size > TOPE_PORTADA && calidad > 0.5) {
+    calidad -= 0.08;
+    blob = await aBlob(c, 'image/jpeg', calidad);
+  }
+  // Si hubo que agrandar la foto, se avisa: puede verse borrosa.
+  const chica = (entera ? Math.min(PORTADA_W / w, PORTADA_H / h) : Math.max(PORTADA_W / w, PORTADA_H / h)) > 1;
+  return { blob, ext: 'jpg', sufijo: '_portada',
+           info: `1280 x 720 px, ${Math.round(blob.size / 1024)} KB` +
+                 (chica ? ' (la original era chica: puede verse borrosa)' : '') };
+}
+
+async function procesarTodas() {
+  if (!items.length) { $('resultado').hidden = true; return; }
+  for (const it of items) {
+    const r = modo === 'logos' ? await prepararLogo(it.img) : await prepararPortada(it.img);
+    if (it.url) URL.revokeObjectURL(it.url);
+    Object.assign(it, r, { url: URL.createObjectURL(r.blob) });
+  }
+  if (elegido >= items.length) elegido = 0;
+  pintar();
+}
+
+function archivoDe(it) { return `${it.nombre}${it.sufijo}.${it.ext}`; }
+
+function bajar(blob, nombre) {
   const a = document.createElement('a');
-  a.href = urlSalida;
-  a.download = `${ultimoNombre}_marcavivo.png`;
+  a.href = URL.createObjectURL(blob);
+  a.download = nombre;
   a.click();
-});
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function pintar() {
+  $('resultado').hidden = false;
+  $('cuantas').textContent = items.length === 1 ? '1 imagen lista' : `${items.length} imágenes listas`;
+  $('bajarTodas').textContent = items.length === 1 ? 'Descargar' : `Descargar las ${items.length} (ZIP)`;
+  const grilla = $('grilla');
+  grilla.innerHTML = '';
+  items.forEach((it, i) => {
+    const d = document.createElement('div');
+    d.className = 'item' + (modo === 'portada' ? ' portada' : '') + (i === elegido ? ' elegido' : '');
+    d.innerHTML = `<div class="muestra"><img alt=""></div>
+      <p class="nombre"></p><div class="info"></div>
+      <div class="fila"><button class="chico">Descargar</button>
+      <button class="chico suave">Quitar</button></div>`;
+    d.querySelector('img').src = it.url;
+    d.querySelector('.nombre').textContent = archivoDe(it);
+    d.querySelector('.info').textContent = it.info;
+    const [descargar, quitar] = d.querySelectorAll('button');
+    descargar.onclick = (ev) => { ev.stopPropagation(); bajar(it.blob, archivoDe(it)); };
+    quitar.onclick = (ev) => {
+      ev.stopPropagation();
+      URL.revokeObjectURL(it.url);
+      items.splice(i, 1);
+      if (elegido >= items.length) elegido = Math.max(0, items.length - 1);
+      items.length ? pintar() : ($('resultado').hidden = true);
+    };
+    d.onclick = () => { elegido = i; pintar(); };
+    grilla.appendChild(d);
+  });
+  const it = items[elegido];
+  $('cualVista').textContent = items.length > 1 ? `(${archivoDe(it)} — tocá otra para verla)` : '';
+  $('p1').src = $('p2').src = $('p3').src = it.url;
+}
+
+$('bajarTodas').onclick = async () => {
+  if (items.length === 1) return bajar(items[0].blob, archivoDe(items[0]));
+  if (!window.JSZip) {
+    // Sin la libreria del ZIP: se bajan de a una.
+    for (const it of items) { bajar(it.blob, archivoDe(it)); await new Promise(r => setTimeout(r, 400)); }
+    return;
+  }
+  const zip = new JSZip();
+  const usados = new Set();
+  for (const it of items) {
+    let n = archivoDe(it), k = 2;
+    while (usados.has(n)) n = `${it.nombre}${it.sufijo}_${k++}.${it.ext}`;
+    usados.add(n);
+    zip.file(n, it.blob);
+  }
+  const blob = await zip.generateAsync({ type: 'blob' });
+  bajar(blob, modo === 'logos' ? 'marcavivo_logos.zip' : 'marcavivo_portadas.zip');
+};
+
+$('borrarTodas').onclick = () => {
+  items.forEach(it => it.url && URL.revokeObjectURL(it.url));
+  items = [];
+  elegido = 0;
+  $('resultado').hidden = true;
+};
+
+cambiarModo('logos');
 </script>
 </body>
 </html>
