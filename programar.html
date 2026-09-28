@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MarcaVivo - Programar partidos</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0D1117; color: #E6EDF3; line-height: 1.5;
+         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { background: #0D2B4E; padding: 14px 18px; }
+  h1 { margin: 0; font-size: 20px; }
+  h1 span { color: #FFC107; }
+  main { padding: 18px 16px; max-width: 980px; margin: 0 auto; }
+  h2 { font-size: 16px; margin: 26px 0 10px; border-bottom: 1px solid #263141; padding-bottom: 6px; }
+  button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+           border: 1px solid #2F81F7; background: #1F6FEB; color: #fff; }
+  button.suave { background: transparent; color: #58A6FF; }
+  button.chico { padding: 4px 10px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: default; }
+  label { display: block; font-size: 12px; color: #8B949E; font-weight: 600; margin-bottom: 3px; }
+  input, select { font: inherit; width: 100%; padding: 8px 10px; border-radius: 6px;
+                  border: 1px solid #30363D; background: #0D1117; color: #E6EDF3; }
+  input:focus, select:focus { outline: 2px solid #1F6FEB; border-color: transparent; }
+  .grilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tarjeta { background: #161B22; border: 1px solid #30363D; border-radius: 10px; padding: 14px;
+             margin-bottom: 12px; }
+  .partido { display: grid; gap: 10px; grid-template-columns: 110px 1fr 1.4fr; align-items: end; }
+  .cabeza { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .cabeza strong { color: #FFC107; }
+  .titulo { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #0D1117;
+            font-size: 14px; word-break: break-word; }
+  .titulo small { display: block; color: #8B949E; font-size: 11px; }
+  .largo { color: #FF7B72; }
+  .mini { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .mini img { width: 240px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px;
+              border: 1px solid #30363D; background: #0D1117; }
+  .mini .vacia { width: 160px; aspect-ratio: 16 / 9; border-radius: 6px; border: 1px dashed #30363D;
+                 display: grid; place-items: center; color: #8B949E; font-size: 12px; text-align: center; }
+  .acciones { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+  .aviso { background: #161B22; border-left: 4px solid #FFC107; padding: 10px 14px; margin: 14px 0;
+           border-radius: 4px; font-size: 14px; }
+  .error { background: #2D1618; border-left-color: #F85149; }
+  .bien { border-left-color: #3FB950; }
+  #resultado li { margin: 6px 0; }
+  #resultado a { color: #58A6FF; }
+  .ok { color: #3FB950; }
+  .no { color: #FF7B72; }
+  footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
+  @media (max-width: 640px) {
+    .partido { grid-template-columns: 1fr 1fr; }
+    .partido .rival { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+
+<header><h1>MarcaVivo <span>· programar partidos</span></h1></header>
+
+<main>
+  <div id="entrada">
+    <p>Entrá con la cuenta de YouTube del club para crear las transmisiones programadas del día.</p>
+    <button id="btnEntrar">ENTRAR CON GOOGLE</button>
+    <div class="aviso">
+      Las programadas quedan listas para MarcaVivo y salen <strong>horizontales</strong>: la
+      orientación la pone la app, que manda el video apaisado. El permiso queda en esta pestaña y
+      se pierde al cerrarla.
+    </div>
+  </div>
+
+  <div id="mensaje"></div>
+
+  <div id="formulario" hidden>
+    <h2>Datos del día</h2>
+    <div class="tarjeta">
+      <div class="grilla">
+        <div><label for="dia">Día</label><input type="date" id="dia"></div>
+        <div><label for="fecha">Nro de fecha</label><input type="number" id="fecha" min="1" max="99" placeholder="Ej: 5"></div>
+        <div style="grid-column: span 2"><label for="torneo">Torneo</label>
+          <input id="torneo" list="listaTorneos" placeholder="Ej: Apertura FeMeBal"></div>
+        <div><label for="privacidad">Visibilidad</label>
+          <select id="privacidad">
+            <option value="public">Pública</option>
+            <option value="unlisted">No listada</option>
+          </select></div>
+      </div>
+      <p style="color:#8B949E;font-size:13px;margin:12px 0 0">
+        La miniatura se arma sola: foto de fondo de la categoría, escudos de All Boys y del rival,
+        y los datos del partido. Las fotos y los escudos se cargan desde la app MarcaVivo
+        (PROGRAMAR → Fondos y escudos) y los usan todos.
+      </p>
+    </div>
+
+    <h2>Partidos</h2>
+    <div id="partidos"></div>
+    <p class="acciones">
+      <button class="suave" id="btnAgregar">+ AGREGAR PARTIDO</button>
+    </p>
+
+    <p class="acciones">
+      <button id="btnCrear">CREAR PROGRAMADAS</button>
+    </p>
+    <div id="resultado"></div>
+  </div>
+</main>
+
+<datalist id="listaCategorias"></datalist>
+<datalist id="listaRivales"></datalist>
+<datalist id="listaTorneos"></datalist>
+
+<footer>MarcaVivo — Handball All Boys</footer>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+// Mismo cliente OAuth que panel.html (no es secreto: identifica a la app ante Google).
+const CLIENT_ID = '500924512787-5lbgk6c3ig7g75ibm7fbqsea5n3c7l2i.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/youtube';
+const API = 'https://www.googleapis.com/youtube/v3';
+const CLUB = 'Handball All Boys';
+const TOPE_TITULO = 100; // YouTube no acepta titulos mas largos
+
+const CATEGORIAS = ['Mini F', 'Mini M', 'Infantiles F', 'Infantiles M', 'Menores F', 'Menores M',
+  'Cadetes F', 'Cadetes M', 'Juveniles F', 'Juveniles M', 'Junior F', 'Junior M',
+  'Primera F', 'Primera M'];
+
+let token = null;
+const $ = (id) => document.getElementById(id);
+
+// ---- Memoria de esta compu: torneo, rivales y categorias usadas ------------------------
+function leer(clave, porDefecto) {
+  try { return JSON.parse(localStorage.getItem('mv_' + clave)) ?? porDefecto; } catch { return porDefecto; }
+}
+function guardar(clave, valor) {
+  try { localStorage.setItem('mv_' + clave, JSON.stringify(valor)); } catch {}
+}
+function recordar(clave, valor) {
+  valor = valor.trim();
+  if (!valor) return;
+  const lista = leer(clave, []).filter((x) => x.toLowerCase() !== valor.toLowerCase());
+  lista.unshift(valor);
+  guardar(clave, lista.slice(0, 60));
+}
+function llenarListas() {
+  const opciones = (lista) => lista.map((x) => '<option value="' + escapar(x) + '">').join('');
+  const cats = [...new Set([...leer('categorias', []), ...CATEGORIAS])];
+  $('listaCategorias').innerHTML = opciones(cats);
+  $('listaRivales').innerHTML = opciones(leer('rivales', []));
+  $('listaTorneos').innerHTML = opciones(leer('torneos', []));
+}
+
+function escapar(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+function avisar(texto, tipo) {
+  $('mensaje').innerHTML = texto
+    ? '<div class="aviso ' + (tipo || '') + '">' + escapar(texto) + '</div>' : '';
+}
+
+// ---- Entrada ---------------------------------------------------------------------------
+$('btnEntrar').onclick = () => {
+  if (!window.google) return avisar('Todavía no cargó Google. Esperá unos segundos y probá de nuevo.', 'error');
+  google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: (r) => {
+      if (r.error) return avisar('No se pudo entrar: ' + r.error, 'error');
+      token = r.access_token;
+      $('entrada').hidden = true;
+      $('formulario').hidden = false;
+      avisar('');
+    },
+  }).requestAccessToken();
+};
+
+// ---- Titulo ----------------------------------------------------------------------------
+// "12hs Infantiles F - Handball All Boys vs Circulo Gral Belgrano - Fecha 5 - Torneo Apertura"
+function horaTexto(hora) {
+  if (!hora) return '';
+  const [h, m] = hora.split(':');
+  return String(Number(h)) + (m === '00' ? '' : ':' + m) + 'hs';
+}
+
+function armarTitulo(p) {
+  const partes = [];
+  const cabeza = [horaTexto(p.hora), p.categoria.trim()].filter(Boolean).join(' ');
+  if (cabeza) partes.push(cabeza);
+  partes.push(CLUB + ' vs ' + (p.rival.trim() || '…'));
+  const fecha = $('fecha').value.trim();
+  if (fecha) partes.push('Fecha ' + fecha);
+  const torneo = $('torneo').value.trim();
+  if (torneo) partes.push('Torneo ' + torneo);
+  return partes.join(' - ');
+}
+
+// ---- Partidos --------------------------------------------------------------------------
+let proximoId = 1;
+
+function agregarPartido(desde) {
+  const id = proximoId++;
+  const div = document.createElement('div');
+  div.className = 'tarjeta';
+  div.dataset.id = id;
+  div.innerHTML =
+    '<div class="cabeza"><strong>Partido</strong>' +
+      '<button class="suave chico" data-quitar>QUITAR</button></div>' +
+    '<div class="partido">' +
+      '<div><label>Hora</label><input type="time" data-campo="hora" step="300"></div>' +
+      '<div><label>Categoría</label><input data-campo="categoria" list="listaCategorias" placeholder="Ej: Infantiles F"></div>' +
+      '<div class="rival"><label>Rival</label><input data-campo="rival" list="listaRivales" placeholder="Ej: Circulo Gral Belgrano"></div>' +
+    '</div>' +
+    '<div class="titulo" data-titulo></div>' +
+    '<div class="mini">' +
+      '<img data-vista alt="Miniatura">' +
+      '<div><label>Otra foto en vez de la armada (opcional)</label>' +
+        '<input type="file" accept="image/*" data-archivo>' +
+        '<button class="suave chico" data-sacarmini hidden>USAR LA ARMADA</button></div>' +
+    '</div>';
+  $('partidos').appendChild(div);
+
+  // El siguiente arranca una hora despues del anterior, con la misma categoria vacia.
+  if (desde?.hora) {
+    const [h, m] = desde.hora.split(':').map(Number);
+    div.querySelector('[data-campo="hora"]').value =
+      String(Math.min(h + 1, 23)).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+  div.querySelector('[data-quitar]').onclick = () => {
+    div.remove();
+    actualizarTitulos();
+  };
+  div.querySelector('[data-archivo]').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      div._mini = await aMiniatura(f);
+      div.querySelector('[data-vista]').src = URL.createObjectURL(div._mini);
+      div.querySelector('[data-sacarmini]').hidden = false;
+    } catch (err) {
+      avisar('No se pudo leer la imagen: ' + err.message, 'error');
+    }
+  };
+  div.querySelector('[data-sacarmini]').onclick = (e) => {
+    div._mini = null;
+    div.querySelector('[data-archivo]').value = '';
+    e.target.hidden = true;
+    div._firma = '';
+    programarMiniatura(div);
+  };
+  actualizarTitulos();
+}
+
+function leerPartidos() {
+  return [...$('partidos').children].map((div) => {
+    const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
+    return { div, hora: campo('hora'), categoria: campo('categoria'), rival: campo('rival'),
+             mini: div._mini || div._armada || null };
+  });
+}
+
+function actualizarTitulos() {
+  for (const p of leerPartidos()) {
+    const t = armarTitulo(p);
+    const largo = t.length > TOPE_TITULO;
+    p.div.querySelector('[data-titulo]').innerHTML =
+      '<small>Título en YouTube (' + t.length + '/' + TOPE_TITULO + ')</small>' +
+      '<span class="' + (largo ? 'largo' : '') + '">' + escapar(t) + '</span>' +
+      (largo ? '<small class="no">Es muy largo: acortá el torneo o el rival.</small>' : '');
+    programarMiniatura(p.div);
+  }
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
+});
+
+// ---- Miniaturas ------------------------------------------------------------------------
+// YouTube pide 16:9 y hasta 2 MB: se recorta al centro y se pasa a JPEG 1280x720.
+function aMiniatura(archivo) {
+  return new Promise((resolver, fallar) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = 1280; c.height = 720;
+      const escala = Math.max(1280 / img.width, 720 / img.height);
+      const w = img.width * escala, h = img.height * escala;
+      c.getContext('2d').drawImage(img, (1280 - w) / 2, (720 - h) / 2, w, h);
+      URL.revokeObjectURL(img.src);
+      c.toBlob((b) => b ? resolver(b) : fallar(new Error('imagen vacía')), 'image/jpeg', 0.88);
+    };
+    img.onerror = () => fallar(new Error('no es una imagen'));
+    img.src = URL.createObjectURL(archivo);
+  });
+}
+
+// ---- Biblioteca compartida (Firebase): fondos por categoria y escudos de clubes ---------
+// La misma que usa la app: biblioteca/indice/<tipo>/<clave> = nombre y
+// biblioteca/<tipo>/<clave>/img = imagen en base64.
+const CLUB_PROPIO = 'All Boys';
+const TEXTO_TIRA = 'Handball Femenino';
+firebase.initializeApp({
+  apiKey: 'AIzaSyBzvM1xcINIEK13awX72hHvwqwytlCgjyA',
+  authDomain: 'marcavivo-ce14c.firebaseapp.com',
+  databaseURL: 'https://marcavivo-ce14c-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId: 'marcavivo-ce14c',
+  appId: '1:72778795291:web:23600f43e8250ea84babbe',
+});
+const entrada = firebase.auth().signInAnonymously();
+const cacheImagenes = {};
+
+// Igual que Biblioteca.clave en la app: sin acentos, minuscula, lo demas con "_".
+function clave(nombre) {
+  return String(nombre || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+async function indiceBiblioteca(tipo) {
+  await entrada;
+  const snap = await firebase.database().ref('biblioteca/indice/' + tipo).get();
+  return Object.values(snap.val() || {});
+}
+
+// Devuelve la imagen ya cargada (HTMLImageElement) o null si no esta.
+function imagenBiblioteca(tipo, nombre) {
+  const k = clave(nombre);
+  if (!k) return Promise.resolve(null);
+  const id = tipo + '/' + k;
+  if (!cacheImagenes[id]) {
+    cacheImagenes[id] = entrada
+      .then(() => firebase.database().ref('biblioteca/' + id + '/img').get())
+      .then((snap) => snap.val()
+        ? new Promise((ok) => {
+            const i = new Image();
+            i.onload = () => ok(i);
+            i.onerror = () => ok(null);
+            i.src = 'data:image;base64,' + snap.val();
+          })
+        : null)
+      .catch(() => null);
+  }
+  return cacheImagenes[id];
+}
+
+// ---- Miniatura armada (mismo diseño que la app) ----------------------------------------
+function cubrir(ctx, i, w, h) {
+  const e = Math.max(w / i.width, h / i.height);
+  const aw = w / e, ah = h / e;
+  ctx.drawImage(i, (i.width - aw) / 2, (i.height - ah) / 2, aw, ah, 0, 0, w, h);
+}
+
+function contener(ctx, i, cx, cy, lado) {
+  const e = Math.min(lado / i.width, lado / i.height);
+  const w = i.width * e, h = i.height * e;
+  ctx.drawImage(i, cx - w / 2, cy - h / 2, w, h);
+}
+
+// Texto centrado; si no entra a lo ancho se achica. y es el borde de arriba (o de abajo).
+function texto(ctx, t, tam, cx, y, desdeAbajo) {
+  if (!t) return;
+  let s = tam;
+  do {
+    ctx.font = '900 ' + s + 'px "Segoe UI", Roboto, Arial, sans-serif';
+    if (ctx.measureText(t).width <= 1200 || s <= 24) break;
+    s -= 4;
+  } while (true);
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#000';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 3;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = desdeAbajo ? 'bottom' : 'top';
+  ctx.fillText(t, cx, y);
+  ctx.restore();
+}
+
+async function armarMiniatura(p) {
+  const categoria = p.categoria.trim();
+  const fecha = $('fecha').value.trim();
+  const torneo = $('torneo').value.trim();
+  const [fondo, propio, rival] = await Promise.all([
+    imagenBiblioteca('fondos', categoria),
+    imagenBiblioteca('clubes', CLUB_PROPIO),
+    imagenBiblioteca('clubes', p.rival),
+  ]);
+  const c = document.createElement('canvas');
+  c.width = 1280; c.height = 720;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0D2B4E';
+  ctx.fillRect(0, 0, 1280, 720);
+  if (fondo) cubrir(ctx, fondo, 1280, 720);
+  let g = ctx.createLinearGradient(0, 0, 0, 210);
+  g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 210);
+  g = ctx.createLinearGradient(0, 490, 0, 720);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.9)');
+  ctx.fillStyle = g; ctx.fillRect(0, 490, 1280, 230);
+
+  texto(ctx, [categoria, fecha && 'Fecha ' + fecha].filter(Boolean).join(' - '), 72, 640, 36, false);
+  texto(ctx, [TEXTO_TIRA, torneo].filter(Boolean).join(' - '), 58, 640, 684, true);
+  const cy = 370;
+  if (propio) contener(ctx, propio, 350, cy, 290);
+  if (rival) contener(ctx, rival, 930, cy, 290);
+  if (propio || rival) texto(ctx, 'VS', 96, 640, cy - 60, false);
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+}
+
+// Rearma la miniatura de un partido un rato despues de dejar de escribir.
+function programarMiniatura(div) {
+  if (div._mini) return; // eligieron otra foto a mano
+  const p = leerPartidos().find((x) => x.div === div);
+  if (!p) return;
+  const firma = [p.categoria, p.rival, $('fecha').value, $('torneo').value].join('|');
+  if (firma === div._firma) return;
+  div._firma = firma;
+  clearTimeout(div._espera);
+  div._espera = setTimeout(async () => {
+    if (!p.categoria.trim()) {
+      div._armada = null;
+      div.querySelector('[data-vista]').removeAttribute('src');
+      return;
+    }
+    const blob = await armarMiniatura(p);
+    if (div._firma !== firma || div._mini) return;
+    div._armada = blob;
+    div.querySelector('[data-vista]').src = URL.createObjectURL(blob);
+  }, 600);
+}
+
+// Los clubes con escudo cargado tambien se sugieren como rival.
+async function sumarClubes() {
+  try {
+    const clubes = (await indiceBiblioteca('clubes')).filter((n) => clave(n) !== clave(CLUB_PROPIO));
+    const rivales = leer('rivales', []);
+    const todos = [...rivales, ...clubes.filter((c) => !rivales.some((r) => r.toLowerCase() === c.toLowerCase()))];
+    $('listaRivales').innerHTML = todos.map((x) => '<option value="' + escapar(x) + '">').join('');
+  } catch (e) {
+    avisar('No se pudo leer la biblioteca de fondos y escudos (' + (e.message || e) +
+      '). Las programadas se crean igual, sin miniatura armada.', 'error');
+  }
+}
+
+// ---- Crear -----------------------------------------------------------------------------
+async function llamar(url, opciones) {
+  const r = await fetch(url, {
+    ...opciones,
+    headers: { Authorization: 'Bearer ' + token, ...(opciones.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = j.error || {};
+    const motivo = e.errors?.[0]?.reason || '';
+    throw new Error((e.message || r.status) + (motivo ? ' (' + motivo + ')' : ''));
+  }
+  return j;
+}
+
+// Pensada para MarcaVivo: sin "prueba" previa ni arranque automatico (la app decide cuando
+// sale al aire), latencia baja y con DVR para poder rebobinar.
+function crearProgramada(titulo, inicio, privacidad) {
+  return llamar(API + '/liveBroadcasts?part=snippet,contentDetails,status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      snippet: { title: titulo, scheduledStartTime: inicio.toISOString() },
+      status: { privacyStatus: privacidad, selfDeclaredMadeForKids: false },
+      contentDetails: {
+        enableAutoStart: false,
+        enableAutoStop: false,
+        enableDvr: true,
+        latencyPreference: 'low',
+        monitorStream: { enableMonitorStream: false },
+      },
+    }),
+  });
+}
+
+function subirMiniatura(id, blob) {
+  return llamar('https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=' +
+    encodeURIComponent(id), {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: blob,
+  });
+}
+
+$('btnAgregar').onclick = () => {
+  const lista = leerPartidos();
+  agregarPartido(lista[lista.length - 1]);
+};
+
+$('btnCrear').onclick = async () => {
+  const dia = $('dia').value;
+  const partidos = leerPartidos();
+  if (!dia) return avisar('Elegí el día.', 'error');
+  if (!partidos.length) return avisar('Agregá al menos un partido.', 'error');
+  for (const [i, p] of partidos.entries()) {
+    const n = 'Partido ' + (i + 1) + ': ';
+    if (!p.hora) return avisar(n + 'falta la hora.', 'error');
+    if (!p.categoria.trim()) return avisar(n + 'falta la categoría.', 'error');
+    if (!p.rival.trim()) return avisar(n + 'falta el rival.', 'error');
+    if (armarTitulo(p).length > TOPE_TITULO) return avisar(n + 'el título es muy largo.', 'error');
+  }
+
+  recordar('torneos', $('torneo').value);
+  guardar('fecha', $('fecha').value);
+  guardar('privacidad', $('privacidad').value);
+  for (const p of partidos) {
+    recordar('rivales', p.rival);
+    if (!CATEGORIAS.includes(p.categoria.trim())) recordar('categorias', p.categoria);
+  }
+  llenarListas();
+
+  $('btnCrear').disabled = true;
+  const privacidad = $('privacidad').value;
+  const hechas = [];
+  try {
+    for (const [i, p] of partidos.entries()) {
+      const titulo = armarTitulo(p);
+      avisar('Creando ' + (i + 1) + ' de ' + partidos.length + ': ' + titulo);
+      const item = { titulo };
+      try {
+        const b = await crearProgramada(titulo, new Date(dia + 'T' + p.hora), privacidad);
+        item.id = b.id;
+        const mini = p.mini;
+        if (mini) {
+          try {
+            await subirMiniatura(b.id, mini);
+            item.mini = true;
+          } catch (e) {
+            item.errorMini = e.message;
+          }
+        }
+      } catch (e) {
+        item.error = e.message;
+        if (/quota/i.test(e.message)) {
+          hechas.push(item);
+          break;
+        }
+      }
+      hechas.push(item);
+    }
+  } finally {
+    $('btnCrear').disabled = false;
+  }
+
+  const bien = hechas.filter((x) => x.id).length;
+  avisar(bien === partidos.length
+    ? 'Listo: se crearon las ' + bien + ' programadas. Actualizá la lista en MarcaVivo para verlas.'
+    : 'Se crearon ' + bien + ' de ' + partidos.length + '. Mirá abajo cuáles fallaron.',
+    bien === partidos.length ? 'bien' : 'error');
+  $('resultado').innerHTML = '<ul>' + hechas.map((x) => '<li>' +
+    (x.id
+      ? '<span class="ok">✓</span> <a href="https://youtube.com/live/' + encodeURIComponent(x.id) +
+        '" target="_blank" rel="noopener">' + escapar(x.titulo) + '</a>' +
+        (x.errorMini ? ' <span class="no">(sin miniatura: ' + escapar(x.errorMini) + ')</span>' : '')
+      : '<span class="no">✗ ' + escapar(x.titulo) + ': ' + escapar(x.error) + '</span>') +
+    '</li>').join('') + '</ul>';
+};
+
+// ---- Arranque --------------------------------------------------------------------------
+(function iniciar() {
+  const hoy = new Date();
+  const dos = (n) => String(n).padStart(2, '0');
+  $('dia').value = hoy.getFullYear() + '-' + dos(hoy.getMonth() + 1) + '-' + dos(hoy.getDate());
+  $('fecha').value = leer('fecha', '');
+  $('torneo').value = leer('torneos', [])[0] || '';
+  $('privacidad').value = leer('privacidad', 'public');
+  llenarListas();
+  agregarPartido();
+  sumarClubes();
+})();
+</script>
+</body>
+</html>
