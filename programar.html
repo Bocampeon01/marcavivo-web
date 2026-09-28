@@ -66,10 +66,6 @@
   .nuevo { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
   .nuevo img { width: 56px; height: 56px; object-fit: contain; background: #1c2230; border-radius: 6px; }
   .faltan { color: #FFC107; font-size: 12px; margin-top: 4px; }
-  .lados { display: flex; gap: 8px; align-items: end; margin-top: 8px; flex-wrap: wrap; }
-  .lados label { margin: 0; }
-  .lados select { width: auto; min-width: 150px; }
-  .lados .vs { font-weight: 900; padding-bottom: 8px; }
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
@@ -120,8 +116,8 @@
       <summary>Escudos de los clubes <span id="cuentaEscudos" style="color:#8B949E;font-weight:400"></span></summary>
       <p style="color:#8B949E;font-size:13px">Elegí uno o varios archivos: <strong>se guardan
         solos</strong>, con el nombre del archivo (✎ para cambiarlo) y sin márgenes de sobra. En cada
-        partido, el del local va a la izquierda y el del visitante a la derecha: se eligen solos por
-        el nombre y se pueden cambiar a mano.</p>
+        partido, al elegir Local y Visitante de la lista, sus escudos se ponen solos en la miniatura
+        (local a la izquierda, visitante a la derecha).</p>
       <p class="acciones">
         <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
         <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
@@ -274,15 +270,7 @@ function agregarPartido(desde) {
     '<div class="titulo" data-titulo></div>' +
     '<div class="mini">' +
       '<img data-vista alt="Miniatura">' +
-      '<div><div class="lados">' +
-          '<label>Escudo local<select data-lado="izq"></select></label>' +
-          '<span class="vs">VS</span>' +
-          '<label>Escudo visitante<select data-lado="der"></select></label>' +
-        '</div>' +
-        '<label style="margin-top:10px">Otra foto de fondo solo para este partido (opcional)</label>' +
-        '<input type="file" accept="image/*" data-archivo>' +
-        '<button class="suave chico" data-sacarmini hidden>USAR LA DE LA CATEGORÍA</button>' +
-        '<div class="faltan" data-faltan></div></div>' +
+      '<div class="faltan" data-faltan></div>' +
     '</div>';
   $('partidos').appendChild(div);
   // Casi siempre somos locales: arranca con All Boys y se cambia si no.
@@ -298,42 +286,17 @@ function agregarPartido(desde) {
     div.remove();
     actualizarTitulos();
   };
-  div.querySelector('[data-archivo]').onchange = async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const img = await abrirImagen(f);
-    if (!img) return avisar('No se pudo leer la imagen.', 'error');
-    div._fondoPropio = img;
-    div.querySelector('[data-sacarmini]').hidden = false;
-    div._firma = '';
-    programarMiniatura(div);
-  };
-  for (const sel of div.querySelectorAll('[data-lado]')) {
-    // Elegido a mano: queda fijo (hasta que se cambie el rival).
-    sel.onchange = () => {
-      div['_' + sel.dataset.lado] = sel.value;
-      div._firma = '';
-      programarMiniatura(div);
-    };
-  }
-  div.querySelector('[data-sacarmini]').onclick = (e) => {
-    div._fondoPropio = null;
-    div.querySelector('[data-archivo]').value = '';
-    e.target.hidden = true;
-    div._firma = '';
-    programarMiniatura(div);
-  };
   actualizarTitulos();
 }
 
 function leerPartidos() {
   return [...$('partidos').children].map((div) => {
     const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
-    const izq = div._izq !== undefined ? div._izq : buscarClub(campo('local'));
+    // El escudo de cada lado sale del equipo elegido (local a la izquierda).
+    const izq = buscarClub(campo('local'));
     return { div, hora: campo('hora'), categoria: campo('categoria'),
              local: campo('local'), rival: campo('rival'),
-             izq,
-             der: div._der !== undefined ? div._der : buscarRival(campo('rival'), izq),
+             izq, der: buscarRival(campo('rival'), izq),
              mini: div._armada || null };
   });
 }
@@ -351,9 +314,6 @@ function actualizarTitulos() {
 }
 
 document.addEventListener('input', (e) => {
-  // Otro rival: el escudo de la derecha se vuelve a buscar solo.
-  if (e.target.matches('input[data-campo="rival"]')) delete e.target.closest('.tarjeta')._der;
-  if (e.target.matches('input[data-campo="local"]')) delete e.target.closest('.tarjeta')._izq;
   if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
 });
 
@@ -458,7 +418,7 @@ async function armarMiniatura(p) {
     imagenBiblioteca('clubes', p.izq),
     imagenBiblioteca('clubes', p.der),
   ]);
-  const fondo = p.div?._fondoPropio || fondoCategoria;
+  const fondo = fondoCategoria;
   const c = document.createElement('canvas');
   c.width = 1280; c.height = 720;
   const ctx = c.getContext('2d');
@@ -486,7 +446,6 @@ async function armarMiniatura(p) {
   const faltan = [];
   if (p.local.trim() && !propio) faltan.push('el escudo de "' + p.local.trim() + '"');
   if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
-  // (si no aparece solo, se puede elegir en "Escudo derecha")
   if (!fondo) faltan.push('la foto de fondo de "' + categoria + '"');
   const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
   return { blob, faltan };
@@ -519,21 +478,10 @@ function buscarRival(texto, local) {
   return buscarClub(texto, clubesCargados.filter((n) => n !== local));
 }
 
-function llenarLados(div, p) {
-  const opciones = '<option value="">— ninguno —</option>' +
-    [...clubesCargados].sort((a, b) => a.localeCompare(b))
-      .map((n) => '<option value="' + escapar(n) + '">' + escapar(n) + '</option>').join('');
-  for (const sel of div.querySelectorAll('[data-lado]')) {
-    if (sel._opciones !== opciones) { sel.innerHTML = opciones; sel._opciones = opciones; }
-    sel.value = p[sel.dataset.lado] || '';
-  }
-}
-
 // Rearma la miniatura de un partido un rato despues de dejar de escribir.
 function programarMiniatura(div) {
   const p = leerPartidos().find((x) => x.div === div);
   if (!p) return;
-  llenarLados(div, p);
   const firma = [p.categoria, p.local, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
   if (firma === div._firma) return;
   div._firma = firma;
