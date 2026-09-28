@@ -48,6 +48,24 @@
   #resultado a { color: #58A6FF; }
   .ok { color: #3FB950; }
   .no { color: #FF7B72; }
+  [hidden] { display: none !important; }
+  details.bib { background: #161B22; border: 1px solid #30363D; border-radius: 10px; padding: 10px 14px;
+                margin-bottom: 12px; }
+  details.bib summary { cursor: pointer; font-weight: 700; }
+  .bibgrilla { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+               margin: 10px 0; }
+  .bibitem { background: #0D1117; border: 1px solid #30363D; border-radius: 8px; padding: 8px;
+             font-size: 13px; }
+  .bibitem .foto { height: 80px; border-radius: 6px; display: flex; align-items: center;
+                   justify-content: center; overflow: hidden; background: #1c2230; color: #8B949E;
+                   font-size: 12px; }
+  .bibitem .foto img { max-width: 100%; max-height: 100%; }
+  .bibitem.fondo .foto img { width: 100%; height: 100%; object-fit: cover; }
+  .bibitem .pie { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+                  margin-top: 6px; }
+  .nuevo { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
+  .nuevo img { width: 56px; height: 56px; object-fit: contain; background: #1c2230; border-radius: 6px; }
+  .faltan { color: #FFC107; font-size: 12px; margin-top: 4px; }
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
@@ -88,10 +106,34 @@
       </div>
       <p style="color:#8B949E;font-size:13px;margin:12px 0 0">
         La miniatura se arma sola: foto de fondo de la categoría, escudos de All Boys y del rival,
-        y los datos del partido. Las fotos y los escudos se cargan desde la app MarcaVivo
-        (PROGRAMAR → Fondos y escudos) y los usan todos.
+        y los datos del partido. Las fotos y los escudos se cargan una vez (acá abajo o desde la app
+        MarcaVivo) y los usan todos.
       </p>
     </div>
+
+    <h2>Fondos y escudos</h2>
+    <details class="bib" id="bibEscudos">
+      <summary>Escudos de los clubes <span id="cuentaEscudos" style="color:#8B949E;font-weight:400"></span></summary>
+      <p style="color:#8B949E;font-size:13px">El del rival se busca por el nombre que se pone en
+        "Rival". Podés elegir varios archivos juntos; les sacamos los márgenes de sobra solos.</p>
+      <p class="acciones">
+        <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
+        <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
+      </p>
+      <div id="nuevosEscudos"></div>
+      <p class="acciones" id="guardarEscudosFila" hidden>
+        <button id="btnGuardarEscudos">GUARDAR ESCUDOS</button>
+        <button class="suave" id="btnCancelarEscudos">CANCELAR</button>
+      </p>
+      <div class="bibgrilla" id="gEscudos"></div>
+    </details>
+    <details class="bib" id="bibFondos">
+      <summary>Fotos de fondo por categoría <span id="cuentaFondos" style="color:#8B949E;font-weight:400"></span></summary>
+      <p style="color:#8B949E;font-size:13px">Cada foto se recorta sola a 16:9. En la miniatura se
+        oscurece para que se lean los textos y se vean los escudos.</p>
+      <input type="file" id="archivoFondo" accept="image/*" hidden>
+      <div class="bibgrilla" id="gFondos"></div>
+    </details>
 
     <h2>Partidos</h2>
     <div id="partidos"></div>
@@ -219,9 +261,10 @@ function agregarPartido(desde) {
     '<div class="titulo" data-titulo></div>' +
     '<div class="mini">' +
       '<img data-vista alt="Miniatura">' +
-      '<div><label>Otra foto en vez de la armada (opcional)</label>' +
+      '<div><label>Otra foto de fondo solo para este partido (opcional)</label>' +
         '<input type="file" accept="image/*" data-archivo>' +
-        '<button class="suave chico" data-sacarmini hidden>USAR LA ARMADA</button></div>' +
+        '<button class="suave chico" data-sacarmini hidden>USAR LA DE LA CATEGORÍA</button>' +
+        '<div class="faltan" data-faltan></div></div>' +
     '</div>';
   $('partidos').appendChild(div);
 
@@ -238,16 +281,15 @@ function agregarPartido(desde) {
   div.querySelector('[data-archivo]').onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    try {
-      div._mini = await aMiniatura(f);
-      div.querySelector('[data-vista]').src = URL.createObjectURL(div._mini);
-      div.querySelector('[data-sacarmini]').hidden = false;
-    } catch (err) {
-      avisar('No se pudo leer la imagen: ' + err.message, 'error');
-    }
+    const img = await abrirImagen(f);
+    if (!img) return avisar('No se pudo leer la imagen.', 'error');
+    div._fondoPropio = img;
+    div.querySelector('[data-sacarmini]').hidden = false;
+    div._firma = '';
+    programarMiniatura(div);
   };
   div.querySelector('[data-sacarmini]').onclick = (e) => {
-    div._mini = null;
+    div._fondoPropio = null;
     div.querySelector('[data-archivo]').value = '';
     e.target.hidden = true;
     div._firma = '';
@@ -260,7 +302,7 @@ function leerPartidos() {
   return [...$('partidos').children].map((div) => {
     const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
     return { div, hora: campo('hora'), categoria: campo('categoria'), rival: campo('rival'),
-             mini: div._mini || div._armada || null };
+             mini: div._armada || null };
   });
 }
 
@@ -280,21 +322,12 @@ document.addEventListener('input', (e) => {
   if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
 });
 
-// ---- Miniaturas ------------------------------------------------------------------------
-// YouTube pide 16:9 y hasta 2 MB: se recorta al centro y se pasa a JPEG 1280x720.
-function aMiniatura(archivo) {
-  return new Promise((resolver, fallar) => {
+// ---- Imagenes --------------------------------------------------------------------------
+function abrirImagen(archivo) {
+  return new Promise((ok) => {
     const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = 1280; c.height = 720;
-      const escala = Math.max(1280 / img.width, 720 / img.height);
-      const w = img.width * escala, h = img.height * escala;
-      c.getContext('2d').drawImage(img, (1280 - w) / 2, (720 - h) / 2, w, h);
-      URL.revokeObjectURL(img.src);
-      c.toBlob((b) => b ? resolver(b) : fallar(new Error('imagen vacía')), 'image/jpeg', 0.88);
-    };
-    img.onerror = () => fallar(new Error('no es una imagen'));
+    img.onload = () => ok(img);
+    img.onerror = () => ok(null);
     img.src = URL.createObjectURL(archivo);
   });
 }
@@ -385,17 +418,23 @@ async function armarMiniatura(p) {
   const categoria = p.categoria.trim();
   const fecha = $('fecha').value.trim();
   const torneo = $('torneo').value.trim();
-  const [fondo, propio, rival] = await Promise.all([
+  const [fondoCategoria, propio, rival] = await Promise.all([
     imagenBiblioteca('fondos', categoria),
     imagenBiblioteca('clubes', CLUB_PROPIO),
     imagenBiblioteca('clubes', p.rival),
   ]);
+  const fondo = p.div?._fondoPropio || fondoCategoria;
   const c = document.createElement('canvas');
   c.width = 1280; c.height = 720;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#0D2B4E';
   ctx.fillRect(0, 0, 1280, 720);
-  if (fondo) cubrir(ctx, fondo, 1280, 720);
+  if (fondo) {
+    cubrir(ctx, fondo, 1280, 720);
+    // La foto se oscurece entera: que se lean los textos y resalten los escudos.
+    ctx.fillStyle = 'rgba(0,0,0,.4)';
+    ctx.fillRect(0, 0, 1280, 720);
+  }
   let g = ctx.createLinearGradient(0, 0, 0, 210);
   g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 210);
@@ -409,12 +448,16 @@ async function armarMiniatura(p) {
   if (propio) contener(ctx, propio, 350, cy, 290);
   if (rival) contener(ctx, rival, 930, cy, 290);
   if (propio || rival) texto(ctx, 'VS', 96, 640, cy - 60, false);
-  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+  const faltan = [];
+  if (!propio) faltan.push('el escudo de ' + CLUB_PROPIO);
+  if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
+  if (!fondo) faltan.push('la foto de fondo de "' + categoria + '"');
+  const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+  return { blob, faltan };
 }
 
 // Rearma la miniatura de un partido un rato despues de dejar de escribir.
 function programarMiniatura(div) {
-  if (div._mini) return; // eligieron otra foto a mano
   const p = leerPartidos().find((x) => x.div === div);
   if (!p) return;
   const firma = [p.categoria, p.rival, $('fecha').value, $('torneo').value].join('|');
@@ -425,14 +468,261 @@ function programarMiniatura(div) {
     if (!p.categoria.trim()) {
       div._armada = null;
       div.querySelector('[data-vista]').removeAttribute('src');
+      div.querySelector('[data-faltan]').textContent = '';
       return;
     }
-    const blob = await armarMiniatura(p);
-    if (div._firma !== firma || div._mini) return;
+    const { blob, faltan } = await armarMiniatura(p);
+    if (div._firma !== firma) return;
     div._armada = blob;
     div.querySelector('[data-vista]').src = URL.createObjectURL(blob);
+    div.querySelector('[data-faltan]').textContent = faltan.length
+      ? 'Falta ' + faltan.join(', ') + ': cargalo en "Fondos y escudos".' : '';
   }, 600);
 }
+
+// ---- Cargar fondos y escudos desde la pagina (a la misma biblioteca que usa la app) ------
+function aBase64(blob) {
+  return new Promise((ok) => {
+    const f = new FileReader();
+    f.onload = () => ok(String(f.result).split(',')[1]);
+    f.readAsDataURL(blob);
+  });
+}
+
+// Hasta donde llega el dibujo: descarta los bordes del color de las esquinas.
+function limites(img) {
+  const c = document.createElement('canvas');
+  const ancho = c.width = img.naturalWidth, alto = c.height = img.naturalHeight;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const p = ctx.getImageData(0, 0, ancho, alto).data;
+  const esquina = (x, y) => { const i = (y * ancho + x) * 4; return [p[i], p[i+1], p[i+2], p[i+3]]; };
+  const refs = [esquina(0, 0), esquina(ancho-1, 0), esquina(0, alto-1), esquina(ancho-1, alto-1)];
+  const fondo = (x, y) => {
+    const i = (y * ancho + x) * 4;
+    if (p[i+3] < 12) return true;
+    return refs.some(r => r[3] >= 12 &&
+      Math.abs(p[i]-r[0]) < 22 && Math.abs(p[i+1]-r[1]) < 22 && Math.abs(p[i+2]-r[2]) < 22);
+  };
+  let x0 = 0, y0 = 0, x1 = ancho - 1, y1 = alto - 1;
+  const filaVacia = y => { for (let x = x0; x <= x1; x++) if (!fondo(x, y)) return false; return true; };
+  const colVacia = x => { for (let y = y0; y <= y1; y++) if (!fondo(x, y)) return false; return true; };
+  while (y0 < y1 && filaVacia(y0)) y0++;
+  while (y1 > y0 && filaVacia(y1)) y1--;
+  while (x0 < x1 && colVacia(x0)) x0++;
+  while (x1 > x0 && colVacia(x1)) x1--;
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+// Escudo: sin margenes de sobra, PNG de 400 px como mucho (igual que la app).
+async function prepararEscudo(img) {
+  let corte = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  try { corte = limites(img); } catch (e) { /* se deja entera */ }
+  const e = Math.min(1, 400 / Math.max(corte.w, corte.h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(corte.w * e));
+  c.height = Math.max(1, Math.round(corte.h * e));
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, corte.x, corte.y, corte.w, corte.h, 0, 0, c.width, c.height);
+  return new Promise((ok) => c.toBlob(ok, 'image/png'));
+}
+
+// Fondo: recortado al centro a 1280x720, JPEG.
+function prepararFondo(img) {
+  const c = document.createElement('canvas');
+  c.width = 1280; c.height = 720;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  cubrir(ctx, img, 1280, 720);
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
+}
+
+async function guardarEnBiblioteca(tipo, nombre, blob) {
+  const k = clave(nombre);
+  if (!k) throw new Error('falta el nombre');
+  await entrada;
+  await firebase.database().ref('biblioteca').update({
+    ['indice/' + tipo + '/' + k]: nombre.trim(),
+    [tipo + '/' + k]: {
+      nombre: nombre.trim(),
+      img: await aBase64(blob),
+      fecha: firebase.database.ServerValue.TIMESTAMP,
+    },
+  });
+  delete cacheImagenes[tipo + '/' + k];
+}
+
+async function borrarDeBiblioteca(tipo, nombre) {
+  const k = clave(nombre);
+  await entrada;
+  await firebase.database().ref('biblioteca').update({
+    ['indice/' + tipo + '/' + k]: null,
+    [tipo + '/' + k]: null,
+  });
+  delete cacheImagenes[tipo + '/' + k];
+}
+
+// Rearma todas las miniaturas (despues de cargar o borrar algo).
+function rearmarMiniaturas() {
+  for (const div of $('partidos').children) {
+    div._firma = '';
+    programarMiniatura(div);
+  }
+}
+
+// "circulo_gral_belgrano_marcavivo.png" -> "Circulo Gral Belgrano"
+function nombreDeArchivo(n) {
+  return n.replace(/\.[^.]+$/, '').replace(/_(marcavivo|portada)$/i, '')
+    .replace(/[_-]+/g, ' ').trim()
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function tarjetaBiblioteca(tipo, nombre, cargado) {
+  const d = document.createElement('div');
+  d.className = 'bibitem' + (tipo === 'fondos' ? ' fondo' : '');
+  d.innerHTML = '<div class="foto">' + (cargado ? '' : 'sin foto') + '</div>' +
+    '<div class="pie"><span></span><span></span></div>';
+  d.querySelector('.pie span').textContent = nombre;
+  const botones = d.querySelectorAll('.pie span')[1];
+  if (cargado) {
+    imagenBiblioteca(tipo, nombre).then((img) => {
+      if (img) d.querySelector('.foto').appendChild(img.cloneNode());
+    });
+    const borrar = document.createElement('button');
+    borrar.className = 'suave chico';
+    borrar.textContent = '✕';
+    borrar.title = 'Borrar para todos';
+    borrar.onclick = async () => {
+      if (!confirm('¿Borrar "' + nombre + '"? Se borra para todos los celulares.')) return;
+      try {
+        await borrarDeBiblioteca(tipo, nombre);
+        await pintarBiblioteca();
+        rearmarMiniaturas();
+      } catch (e) {
+        avisar('No se pudo borrar: ' + (e.message || e), 'error');
+      }
+    };
+    botones.appendChild(borrar);
+  }
+  if (tipo === 'fondos') {
+    const cargar = document.createElement('button');
+    cargar.className = 'suave chico';
+    cargar.textContent = cargado ? 'CAMBIAR' : 'CARGAR';
+    cargar.onclick = () => {
+      fondoPendiente = nombre;
+      $('archivoFondo').value = '';
+      $('archivoFondo').click();
+    };
+    botones.prepend(cargar);
+  }
+  return d;
+}
+
+let fondoPendiente = null;
+
+async function pintarBiblioteca() {
+  try {
+    const [clubes, fondos] = await Promise.all([indiceBiblioteca('clubes'), indiceBiblioteca('fondos')]);
+    const gE = $('gEscudos');
+    gE.innerHTML = '';
+    if (!clubes.some((n) => clave(n) === clave(CLUB_PROPIO))) {
+      const aviso = document.createElement('div');
+      aviso.className = 'faltan';
+      aviso.textContent = 'Falta el escudo de ' + CLUB_PROPIO + ': va en todas las miniaturas. ' +
+        'Agregalo con el nombre "' + CLUB_PROPIO + '".';
+      gE.appendChild(aviso);
+    }
+    for (const n of [...clubes].sort((a, b) => a.localeCompare(b))) gE.appendChild(tarjetaBiblioteca('clubes', n, true));
+    $('cuentaEscudos').textContent = '(' + clubes.length + ' cargados)';
+
+    const gF = $('gFondos');
+    gF.innerHTML = '';
+    const conFoto = new Set(fondos.map(clave));
+    const nombres = [...CATEGORIAS, ...fondos.filter((f) => !CATEGORIAS.some((c) => clave(c) === clave(f)))];
+    for (const n of nombres) gF.appendChild(tarjetaBiblioteca('fondos', n, conFoto.has(clave(n))));
+    $('cuentaFondos').textContent = '(' + fondos.length + ' de ' + CATEGORIAS.length + ' categorías)';
+  } catch (e) {
+    avisar('No se pudo leer la biblioteca de fondos y escudos: ' + (e.message || e), 'error');
+  }
+}
+
+$('archivoFondo').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f || !fondoPendiente) return;
+  const img = await abrirImagen(f);
+  if (!img) return avisar('No se pudo leer la imagen.', 'error');
+  try {
+    avisar('Guardando la foto de "' + fondoPendiente + '"...');
+    await guardarEnBiblioteca('fondos', fondoPendiente, await prepararFondo(img));
+    avisar('Listo: la foto de "' + fondoPendiente + '" quedó para todos.', 'bien');
+    await pintarBiblioteca();
+    rearmarMiniaturas();
+  } catch (err) {
+    avisar('No se pudo guardar: ' + (err.message || err), 'error');
+  }
+};
+
+let escudosNuevos = [];
+
+$('btnElegirEscudos').onclick = () => { $('archivosEscudos').value = ''; $('archivosEscudos').click(); };
+$('archivosEscudos').onchange = async (e) => {
+  for (const f of [...e.target.files]) {
+    const img = await abrirImagen(f);
+    if (img) escudosNuevos.push({ img, nombre: nombreDeArchivo(f.name) });
+  }
+  pintarNuevos();
+};
+
+function pintarNuevos() {
+  const cont = $('nuevosEscudos');
+  cont.innerHTML = '';
+  escudosNuevos.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'nuevo';
+    d.innerHTML = '<img alt=""><input list="listaRivales" style="max-width:320px">' +
+      '<button class="suave chico">✕</button>';
+    d.querySelector('img').src = n.img.src;
+    const campo = d.querySelector('input');
+    campo.value = n.nombre;
+    campo.oninput = () => { n.nombre = campo.value; };
+    d.querySelector('button').onclick = () => { escudosNuevos.splice(i, 1); pintarNuevos(); };
+    cont.appendChild(d);
+  });
+  $('guardarEscudosFila').hidden = escudosNuevos.length === 0;
+  if (escudosNuevos.length) {
+    const ayuda = document.createElement('p');
+    ayuda.style.cssText = 'color:#8B949E;font-size:12px;margin:4px 0';
+    ayuda.textContent = 'Revisá los nombres: tienen que ser iguales a como se escribe el rival ' +
+      '(el nuestro, "' + CLUB_PROPIO + '").';
+    cont.prepend(ayuda);
+  }
+}
+
+$('btnCancelarEscudos').onclick = () => { escudosNuevos = []; pintarNuevos(); };
+$('btnGuardarEscudos').onclick = async () => {
+  const faltaNombre = escudosNuevos.find((n) => !clave(n.nombre));
+  if (faltaNombre) return avisar('Hay un escudo sin nombre.', 'error');
+  $('btnGuardarEscudos').disabled = true;
+  let listos = 0;
+  try {
+    for (const n of escudosNuevos) {
+      avisar('Guardando ' + (listos + 1) + ' de ' + escudosNuevos.length + ': ' + n.nombre + '...');
+      await guardarEnBiblioteca('clubes', n.nombre, await prepararEscudo(n.img));
+      listos++;
+    }
+    avisar(listos === 1 ? 'Listo: se guardó el escudo para todos.' : 'Listo: se guardaron ' + listos + ' escudos para todos.', 'bien');
+    escudosNuevos = [];
+    pintarNuevos();
+    await pintarBiblioteca();
+    await sumarClubes();
+    rearmarMiniaturas();
+  } catch (e) {
+    avisar('Se guardaron ' + listos + '. Falló uno: ' + (e.message || e), 'error');
+  } finally {
+    $('btnGuardarEscudos').disabled = false;
+  }
+};
 
 // Los clubes con escudo cargado tambien se sugieren como rival.
 async function sumarClubes() {
@@ -576,6 +866,7 @@ $('btnCrear').onclick = async () => {
   llenarListas();
   agregarPartido();
   sumarClubes();
+  pintarBiblioteca();
 })();
 </script>
 </body>
