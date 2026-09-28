@@ -160,7 +160,7 @@
 const CLIENT_ID = '500924512787-5lbgk6c3ig7g75ibm7fbqsea5n3c7l2i.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/youtube';
 const API = 'https://www.googleapis.com/youtube/v3';
-const CLUB = 'Handball All Boys';
+const DEPORTE = 'Handball'; // va fijo en el titulo, antes de los clubes
 const TOPE_TITULO = 100; // YouTube no acepta titulos mas largos
 
 // Cada categoria compite en dos tiras (F y B), menos Mayores y Mayores Desarrollo.
@@ -227,10 +227,10 @@ function horaTexto(hora) {
   return String(Number(h)) + (m === '00' ? '' : ':' + m) + 'hs';
 }
 
-// "All Boys" (como se escriba) va en el titulo como el nombre del canal.
+// Como va un club en el titulo: sin "Logo", y el nuestro siempre como "All Boys".
 function nombreEnTitulo(n) {
   n = sinPrefijo(n);
-  return clave(n).includes(clave(CLUB_PROPIO)) ? CLUB : n;
+  return clave(n).includes(clave(CLUB_PROPIO)) ? CLUB_PROPIO : n;
 }
 
 // "Logo Ferro" / "Escudo de Ferro" -> "Ferro" (asi se cargaron muchos escudos).
@@ -242,7 +242,8 @@ function armarTitulo(p) {
   const partes = [];
   const cabeza = [horaTexto(p.hora), p.categoria.trim()].filter(Boolean).join(' ');
   if (cabeza) partes.push(cabeza);
-  partes.push(nombreEnTitulo(p.local) + ' vs ' + (nombreEnTitulo(p.rival) || '…'));
+  // "Infantiles F - Handball Municipalidad De Pilar vs All Boys - ..."
+  partes.push(DEPORTE + ' ' + (nombreEnTitulo(p.local) || '…') + ' vs ' + (nombreEnTitulo(p.rival) || '…'));
   const fecha = $('fecha').value.trim();
   if (fecha) partes.push('Fecha ' + fecha);
   const torneo = $('torneo').value.trim();
@@ -433,8 +434,13 @@ function cubrir(ctx, i, w, h) {
 function contener(ctx, i, cx, cy, lado) {
   const e = Math.min(lado / i.width, lado / i.height);
   const w = i.width * e, h = i.height * e;
+  // Un poco transparentes (70%): se ve algo de la foto de fondo a traves.
+  ctx.save();
+  ctx.globalAlpha = OPACIDAD_ESCUDOS;
   ctx.drawImage(i, cx - w / 2, cy - h / 2, w, h);
+  ctx.restore();
 }
+const OPACIDAD_ESCUDOS = 0.7;
 
 // Texto centrado; si no entra a lo ancho se achica. y es el borde de arriba (o de abajo).
 function texto(ctx, t, tam, cx, y, desdeAbajo) {
