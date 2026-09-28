@@ -27,7 +27,7 @@
   .grilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .tarjeta { background: #161B22; border: 1px solid #30363D; border-radius: 10px; padding: 14px;
              margin-bottom: 12px; }
-  .partido { display: grid; gap: 10px; grid-template-columns: 110px 1fr 1.4fr; align-items: end; }
+  .partido { display: grid; gap: 10px; grid-template-columns: 110px 1fr 1.3fr 1.3fr; align-items: end; }
   .cabeza { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .cabeza strong { color: #FFC107; }
   .titulo { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #0D1117;
@@ -73,7 +73,7 @@
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
-    .partido .rival { grid-column: 1 / -1; }
+    .partido .equipo { grid-column: 1 / -1; }
   }
 </style>
 </head>
@@ -109,8 +109,8 @@
           </select></div>
       </div>
       <p style="color:#8B949E;font-size:13px;margin:12px 0 0">
-        La miniatura se arma sola: foto de fondo de la categoría, escudos de All Boys y del rival,
-        y los datos del partido. Las fotos y los escudos se cargan una vez (acá abajo o desde la app
+        La miniatura se arma sola: foto de fondo de la categoría, escudos del local (izquierda) y
+        del visitante (derecha), y los datos del partido. Las fotos y los escudos se cargan una vez (acá abajo o desde la app
         MarcaVivo) y los usan todos.
       </p>
     </div>
@@ -120,8 +120,8 @@
       <summary>Escudos de los clubes <span id="cuentaEscudos" style="color:#8B949E;font-weight:400"></span></summary>
       <p style="color:#8B949E;font-size:13px">Elegí uno o varios archivos: <strong>se guardan
         solos</strong>, con el nombre del archivo (✎ para cambiarlo) y sin márgenes de sobra. En cada
-        partido, el de All Boys va a la izquierda y el del rival a la derecha: se eligen solos por el
-        nombre y se pueden cambiar a mano.</p>
+        partido, el del local va a la izquierda y el del visitante a la derecha: se eligen solos por
+        el nombre y se pueden cambiar a mano.</p>
       <p class="acciones">
         <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
         <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
@@ -231,11 +231,22 @@ function horaTexto(hora) {
   return String(Number(h)) + (m === '00' ? '' : ':' + m) + 'hs';
 }
 
+// "All Boys" (como se escriba) va en el titulo como el nombre del canal.
+function nombreEnTitulo(n) {
+  n = sinPrefijo(n);
+  return clave(n).includes(clave(CLUB_PROPIO)) ? CLUB : n;
+}
+
+// "Logo Ferro" / "Escudo de Ferro" -> "Ferro" (asi se cargaron muchos escudos).
+function sinPrefijo(n) {
+  return String(n || '').trim().replace(/^(logo|escudo)\s+(de(l)?\s+)?/i, '').replace(/\s+logo$/i, '');
+}
+
 function armarTitulo(p) {
   const partes = [];
   const cabeza = [horaTexto(p.hora), p.categoria.trim()].filter(Boolean).join(' ');
   if (cabeza) partes.push(cabeza);
-  partes.push(CLUB + ' vs ' + (p.rival.trim() || '…'));
+  partes.push(nombreEnTitulo(p.local) + ' vs ' + (nombreEnTitulo(p.rival) || '…'));
   const fecha = $('fecha').value.trim();
   if (fecha) partes.push('Fecha ' + fecha);
   const torneo = $('torneo').value.trim();
@@ -257,15 +268,16 @@ function agregarPartido(desde) {
     '<div class="partido">' +
       '<div><label>Hora</label><input type="time" data-campo="hora" step="300"></div>' +
       '<div><label>Categoría</label><input data-campo="categoria" list="listaCategorias" placeholder="Ej: Infantiles F"></div>' +
-      '<div class="rival"><label>Rival</label><input data-campo="rival" list="listaRivales" placeholder="Ej: Circulo Gral Belgrano"></div>' +
+      '<div class="equipo"><label>Local</label><input data-campo="local" list="listaRivales" placeholder="Ej: All Boys"></div>' +
+      '<div class="equipo"><label>Visitante</label><input data-campo="rival" list="listaRivales" placeholder="Ej: Circulo Gral Belgrano"></div>' +
     '</div>' +
     '<div class="titulo" data-titulo></div>' +
     '<div class="mini">' +
       '<img data-vista alt="Miniatura">' +
       '<div><div class="lados">' +
-          '<label>Escudo izquierda<select data-lado="izq"></select></label>' +
+          '<label>Escudo local<select data-lado="izq"></select></label>' +
           '<span class="vs">VS</span>' +
-          '<label>Escudo derecha<select data-lado="der"></select></label>' +
+          '<label>Escudo visitante<select data-lado="der"></select></label>' +
         '</div>' +
         '<label style="margin-top:10px">Otra foto de fondo solo para este partido (opcional)</label>' +
         '<input type="file" accept="image/*" data-archivo>' +
@@ -273,6 +285,8 @@ function agregarPartido(desde) {
         '<div class="faltan" data-faltan></div></div>' +
     '</div>';
   $('partidos').appendChild(div);
+  // Casi siempre somos locales: arranca con All Boys y se cambia si no.
+  div.querySelector('[data-campo="local"]').value = desde?.local || CLUB_PROPIO;
 
   // El siguiente arranca una hora despues del anterior, con la misma categoria vacia.
   if (desde?.hora) {
@@ -315,9 +329,11 @@ function agregarPartido(desde) {
 function leerPartidos() {
   return [...$('partidos').children].map((div) => {
     const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
-    return { div, hora: campo('hora'), categoria: campo('categoria'), rival: campo('rival'),
-             izq: div._izq !== undefined ? div._izq : buscarClub(CLUB_PROPIO),
-             der: div._der !== undefined ? div._der : buscarRival(campo('rival')),
+    const izq = div._izq !== undefined ? div._izq : buscarClub(campo('local'));
+    return { div, hora: campo('hora'), categoria: campo('categoria'),
+             local: campo('local'), rival: campo('rival'),
+             izq,
+             der: div._der !== undefined ? div._der : buscarRival(campo('rival'), izq),
              mini: div._armada || null };
   });
 }
@@ -337,6 +353,7 @@ function actualizarTitulos() {
 document.addEventListener('input', (e) => {
   // Otro rival: el escudo de la derecha se vuelve a buscar solo.
   if (e.target.matches('input[data-campo="rival"]')) delete e.target.closest('.tarjeta')._der;
+  if (e.target.matches('input[data-campo="local"]')) delete e.target.closest('.tarjeta')._izq;
   if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
 });
 
@@ -467,7 +484,7 @@ async function armarMiniatura(p) {
   if (rival) contener(ctx, rival, 930, cy, 290);
   if (propio || rival) texto(ctx, 'VS', 96, 640, cy - 60, false);
   const faltan = [];
-  if (!propio) faltan.push('el escudo de ' + CLUB_PROPIO);
+  if (p.local.trim() && !propio) faltan.push('el escudo de "' + p.local.trim() + '"');
   if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
   // (si no aparece solo, se puede elegir en "Escudo derecha")
   if (!fondo) faltan.push('la foto de fondo de "' + categoria + '"');
@@ -498,9 +515,8 @@ function buscarClub(texto, lista = clubesCargados) {
 }
 
 // El del rival, sin confundirlo con el nuestro.
-function buscarRival(texto) {
-  const propio = buscarClub(CLUB_PROPIO);
-  return buscarClub(texto, clubesCargados.filter((n) => n !== propio));
+function buscarRival(texto, local) {
+  return buscarClub(texto, clubesCargados.filter((n) => n !== local));
 }
 
 function llenarLados(div, p) {
@@ -518,7 +534,7 @@ function programarMiniatura(div) {
   const p = leerPartidos().find((x) => x.div === div);
   if (!p) return;
   llenarLados(div, p);
-  const firma = [p.categoria, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
+  const firma = [p.categoria, p.local, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
   if (firma === div._firma) return;
   div._firma = firma;
   clearTimeout(div._espera);
@@ -633,6 +649,7 @@ function rearmarMiniaturas() {
 function nombreDeArchivo(n) {
   return n.replace(/\.[^.]+$/, '').replace(/_(marcavivo|portada)$/i, '')
     .replace(/[_-]+/g, ' ').trim()
+    .replace(/^(logo|escudo)\s+(de(l)?\s+)?/i, '')
     .replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
@@ -785,7 +802,8 @@ async function renombrarEscudo(viejo) {
 // Los clubes con escudo cargado tambien se sugieren como rival.
 async function sumarClubes() {
   try {
-    const clubes = (await indiceBiblioteca('clubes')).filter((n) => clave(n) !== clave(CLUB_PROPIO));
+    const clubes = [CLUB_PROPIO, ...(await indiceBiblioteca('clubes'))
+      .filter((n) => !clave(n).includes(clave(CLUB_PROPIO))).map(sinPrefijo)];
     const rivales = leer('rivales', []);
     const todos = [...rivales, ...clubes.filter((c) => !rivales.some((r) => r.toLowerCase() === c.toLowerCase()))];
     $('listaRivales').innerHTML = todos.map((x) => '<option value="' + escapar(x) + '">').join('');
@@ -853,7 +871,8 @@ $('btnCrear').onclick = async () => {
     const n = 'Partido ' + (i + 1) + ': ';
     if (!p.hora) return avisar(n + 'falta la hora.', 'error');
     if (!p.categoria.trim()) return avisar(n + 'falta la categoría.', 'error');
-    if (!p.rival.trim()) return avisar(n + 'falta el rival.', 'error');
+    if (!p.local.trim()) return avisar(n + 'falta el local.', 'error');
+    if (!p.rival.trim()) return avisar(n + 'falta el visitante.', 'error');
     if (armarTitulo(p).length > TOPE_TITULO) return avisar(n + 'el título es muy largo.', 'error');
   }
 
@@ -862,6 +881,7 @@ $('btnCrear').onclick = async () => {
   guardar('privacidad', $('privacidad').value);
   for (const p of partidos) {
     recordar('rivales', p.rival);
+    if (!clave(p.local).includes(clave(CLUB_PROPIO))) recordar('rivales', p.local);
     if (!CATEGORIAS.includes(p.categoria.trim())) recordar('categorias', p.categoria);
   }
   llenarListas();
