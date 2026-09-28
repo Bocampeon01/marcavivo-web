@@ -27,7 +27,8 @@
   .grilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .tarjeta { background: #161B22; border: 1px solid #30363D; border-radius: 10px; padding: 14px;
              margin-bottom: 12px; }
-  .partido { display: grid; gap: 10px; grid-template-columns: 110px 1fr 1.3fr 1.3fr; align-items: end; }
+  .partido { display: grid; gap: 10px; grid-template-columns: 110px 1.2fr 130px 1.3fr 1.3fr; align-items: end; }
+  .etq { display: flex; align-items: center; }
   .cabeza { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .cabeza strong { color: #FFC107; }
   .titulo { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #0D1117;
@@ -73,6 +74,18 @@
   .bibitem .nombreSel { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .bibitem .nombreSel span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button.peligro { background: #B62324; border-color: #F85149; }
+  .rueda { background: none; border: none; color: #58A6FF; padding: 0 0 0 6px; font-size: 15px;
+           cursor: pointer; line-height: 1; }
+  .titulo input { font-size: 14px; }
+  .titulo .fila { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  dialog#dlgCategorias { background: #161B22; color: #E6EDF3; border: 1px solid #30363D;
+                         border-radius: 10px; max-width: 760px; width: calc(100% - 32px); padding: 18px; }
+  dialog#dlgCategorias::backdrop { background: rgba(0,0,0,.7); }
+  .grupoCat { margin: 10px 0; }
+  .grupoCat .opciones { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 4px; }
+  .grupoCat label { display: flex; align-items: center; gap: 6px; color: #E6EDF3; font-size: 14px;
+                    font-weight: 400; margin: 0; cursor: pointer; }
+  .grupoCat input { width: 17px; height: 17px; accent-color: #1F6FEB; }
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
@@ -138,7 +151,8 @@
     <details class="bib" id="bibFondos">
       <summary>Fotos de fondo por categoría <span id="cuentaFondos" style="color:#8B949E;font-weight:400"></span></summary>
       <p style="color:#8B949E;font-size:13px">Cada foto se recorta sola a 16:9. En la miniatura se
-        oscurece para que se lean los textos y se vean los escudos.</p>
+        oscurece para que se lean los textos y se vean los escudos. La de un grupo ("Infantiles")
+        se usa para todas sus categorías que no tengan una propia.</p>
       <input type="file" id="archivoFondo" accept="image/*" hidden>
       <div class="seleccion" data-seleccion="fondos">
         <label><input type="checkbox" data-todos="fondos"> Seleccionar todas las cargadas</label>
@@ -161,6 +175,19 @@
 </main>
 
 <datalist id="listaCategorias"></datalist>
+
+<dialog id="dlgCategorias">
+  <h3 style="margin-top:0">Categorías que aparecen en la lista</h3>
+  <p style="color:#8B949E;font-size:13px;margin:0">Tildá las que se usan. Se guarda en esta compu.</p>
+  <div id="grillaCategorias"></div>
+  <p class="acciones">
+    <button class="suave" id="btnCatTodas">TODAS</button>
+    <button class="suave" id="btnCatNinguna">NINGUNA</button>
+    <span style="flex:1"></span>
+    <button class="suave" id="btnCatCancelar">CANCELAR</button>
+    <button id="btnCatListo">LISTO</button>
+  </p>
+</dialog>
 <datalist id="listaRivales"></datalist>
 <datalist id="listaTorneos"></datalist>
 
@@ -178,19 +205,42 @@ const API = 'https://www.googleapis.com/youtube/v3';
 const DEPORTE = 'Handball'; // va fijo en el titulo, antes de los clubes
 const TOPE_TITULO = 100; // YouTube no acepta titulos mas largos
 
-// Cada categoria compite en dos tiras (F y B), menos Mayores y Mayores Desarrollo.
-const CATEGORIAS = ['Mini F', 'Mini B', 'Infantiles F', 'Infantiles B', 'Menores F', 'Menores B',
-  'Cadetas F', 'Cadetas B', 'Juveniles F', 'Juveniles B', 'Juniors F', 'Juniors B',
-  'Mayores', 'Mayores Desarrollo'];
+// Todas las categorias posibles, por grupo. En la lista de cada partido aparecen solo las
+// tildadas en la rueda de configuracion (se guarda en esta compu).
+const GRUPOS_CATEGORIAS = [
+  ['Mini', ['A', 'B', 'C', 'D', 'E', 'F']],
+  ['Infantiles', ['A', 'B', 'C', 'D', 'E', 'F']],
+  ['Menores', ['A', 'B', 'C', 'D', 'E', 'F', 'Desarrollo']],
+  ['Cadetas', ['A', 'B', 'C', 'D', 'E', 'F', 'Desarrollo']],
+  ['Juveniles', ['A', 'B', 'C', 'D', 'E', 'F', 'Desarrollo']],
+  ['Juniors', ['A', 'B', 'C', 'D', 'E', 'F']],
+  ['Mayores', ['LHD', 'Liga Honor Plata', '1ra División', '2da División', '3ra División',
+               '4ta División', 'Desarrollo', 'Multidivisión']],
+];
+const CATEGORIAS = GRUPOS_CATEGORIAS.flatMap(([g, subs]) => subs.map((x) => g + ' ' + x));
+const BASES = GRUPOS_CATEGORIAS.map(([g]) => g);
+const RAMAS = ['Femenino', 'Masculino'];
+
+function categoriasElegidas() {
+  const guardadas = leer('categorias_elegidas', null);
+  return Array.isArray(guardadas) ? CATEGORIAS.filter((c) => guardadas.includes(c)) : CATEGORIAS;
+}
 
 let token = null;
 const $ = (id) => document.getElementById(id);
 
 // ---- Memoria de esta compu: torneo, rivales y categorias usadas ------------------------
+// Si el navegador no deja guardar (modo privado), queda en memoria mientras la pagina este abierta.
+const memoria = {};
 function leer(clave, porDefecto) {
-  try { return JSON.parse(localStorage.getItem('mv_' + clave)) ?? porDefecto; } catch { return porDefecto; }
+  try {
+    const v = JSON.parse(localStorage.getItem('mv_' + clave));
+    if (v != null) return v;
+  } catch {}
+  return clave in memoria ? memoria[clave] : porDefecto;
 }
 function guardar(clave, valor) {
+  memoria[clave] = valor;
   try { localStorage.setItem('mv_' + clave, JSON.stringify(valor)); } catch {}
 }
 function recordar(clave, valor) {
@@ -262,7 +312,7 @@ function armarTitulo(p) {
   const fecha = $('fecha').value.trim();
   if (fecha) partes.push('Fecha ' + fecha);
   const torneo = $('torneo').value.trim();
-  if (torneo) partes.push('Torneo ' + torneo);
+  if (torneo) partes.push(torneo);
   return partes.join(' - ');
 }
 
@@ -279,13 +329,22 @@ function agregarPartido(desde) {
       '<button class="suave chico" data-quitar>QUITAR</button></div>' +
     '<div class="partido">' +
       '<div><label>Hora</label><input type="time" data-campo="hora" step="300"></div>' +
-      '<div><label>Categoría</label><input data-campo="categoria" list="listaCategorias" placeholder="Ej: Infantiles F"></div>' +
+      '<div><div class="etq"><label>Categoría</label>' +
+        '<button class="rueda" data-rueda title="Elegir qué categorías aparecen en la lista">⚙</button></div>' +
+        '<select data-campo="categoria"></select></div>' +
+      '<div><label>Rama</label><select data-campo="rama">' +
+        RAMAS.map((r) => '<option>' + r + '</option>').join('') + '</select></div>' +
       '<div class="equipo"><label>Local</label><select data-equipo="local"></select>' +
         '<input data-otro="local" placeholder="Nombre del club" hidden style="margin-top:6px"></div>' +
       '<div class="equipo"><label>Visitante</label><select data-equipo="rival"></select>' +
         '<input data-otro="rival" placeholder="Nombre del club" hidden style="margin-top:6px"></div>' +
     '</div>' +
-    '<div class="titulo" data-titulo></div>' +
+    '<div class="titulo">' +
+      '<div class="fila"><small data-cuenta></small>' +
+        '<button class="suave chico" data-automatico hidden>↺ VOLVER AL AUTOMÁTICO</button></div>' +
+      '<input data-tituloedit title="Se puede corregir a mano">' +
+      '<small class="no" data-largo></small>' +
+    '</div>' +
     '<div class="mini">' +
       '<img data-vista alt="Miniatura">' +
       '<div class="faltan" data-faltan></div>' +
@@ -294,6 +353,13 @@ function agregarPartido(desde) {
   // Casi siempre somos locales: arranca con All Boys (o con el local del partido anterior).
   div._localInicial = desde ? desde.local : null;
   llenarEquipos(div);
+  llenarCategorias(div, '');
+  div.querySelector('[data-campo="rama"]').value = desde?.rama || leer('rama', 'Femenino');
+  div.querySelector('[data-rueda]').onclick = abrirCategorias;
+  // Titulo: se arma solo; si se escribe a mano, queda asi (hasta volver al automatico).
+  const edit = div.querySelector('[data-tituloedit]');
+  edit.oninput = () => { div._tituloManual = true; actualizarTitulos(); };
+  div.querySelector('[data-automatico]').onclick = () => { div._tituloManual = false; actualizarTitulos(); };
   for (const sel of div.querySelectorAll('[data-equipo]')) {
     sel.onchange = () => {
       // "Otro club": se escribe el nombre a mano (sale sin escudo).
@@ -314,6 +380,42 @@ function agregarPartido(desde) {
   };
   actualizarTitulos();
 }
+
+// Lista de categorias de un partido: las elegidas (y la que ya tenia, aunque no este).
+function llenarCategorias(div, valor) {
+  const sel = div.querySelector('[data-campo="categoria"]');
+  const actual = valor != null ? valor : sel.value;
+  const lista = categoriasElegidas();
+  if (actual && !lista.includes(actual)) lista.unshift(actual);
+  sel.innerHTML = '<option value="">— elegir —</option>' +
+    lista.map((c) => '<option>' + escapar(c) + '</option>').join('');
+  sel.value = actual || '';
+}
+
+function abrirCategorias() {
+  const elegidas = new Set(categoriasElegidas());
+  $('grillaCategorias').innerHTML = GRUPOS_CATEGORIAS.map(([g, subs]) =>
+    '<div class="grupoCat"><strong>' + g + '</strong><div class="opciones">' +
+    subs.map((x) => {
+      const c = g + ' ' + x;
+      return '<label><input type="checkbox" value="' + escapar(c) + '"' +
+        (elegidas.has(c) ? ' checked' : '') + '> ' + escapar(x) + '</label>';
+    }).join('') + '</div></div>').join('');
+  $('dlgCategorias').showModal();
+}
+const casillasCat = () => [...document.querySelectorAll('#grillaCategorias input')];
+$('btnCatTodas').onclick = () => casillasCat().forEach((c) => { c.checked = true; });
+$('btnCatNinguna').onclick = () => casillasCat().forEach((c) => { c.checked = false; });
+$('btnCatCancelar').onclick = () => $('dlgCategorias').close();
+$('btnCatListo').onclick = () => {
+  const elegidas = casillasCat().filter((c) => c.checked).map((c) => c.value);
+  if (!elegidas.length) return alert('Tildá al menos una categoría.');
+  guardar('categorias_elegidas', elegidas);
+  $('dlgCategorias').close();
+  for (const div of $('partidos').children) llenarCategorias(div);
+  pintarBiblioteca();
+  actualizarTitulos();
+};
 
 const OTRO = '__otro__';
 
@@ -358,26 +460,37 @@ function leerPartidos() {
       const v = div.querySelector('[data-equipo="' + lado + '"]').value;
       return v === OTRO ? '' : v;
     };
-    return { div, hora: campo('hora'), categoria: campo('categoria'),
+    return { div, hora: campo('hora'), categoria: campo('categoria'), rama: campo('rama'),
              local, rival, izq: deLista('local'), der: deLista('rival'),
              mini: div._armada || null };
   });
 }
 
+// Titulo final de un partido: el armado, o el corregido a mano.
+function tituloDe(p) {
+  return p.div._tituloManual ? p.div.querySelector('[data-tituloedit]').value.trim() : armarTitulo(p);
+}
+
 function actualizarTitulos() {
   for (const p of leerPartidos()) {
-    const t = armarTitulo(p);
+    const edit = p.div.querySelector('[data-tituloedit]');
+    if (!p.div._tituloManual && document.activeElement !== edit) edit.value = armarTitulo(p);
+    const t = tituloDe(p);
     const largo = t.length > TOPE_TITULO;
-    p.div.querySelector('[data-titulo]').innerHTML =
-      '<small>Título en YouTube (' + t.length + '/' + TOPE_TITULO + ')</small>' +
-      '<span class="' + (largo ? 'largo' : '') + '">' + escapar(t) + '</span>' +
-      (largo ? '<small class="no">Es muy largo: acortá el torneo o el rival.</small>' : '');
+    p.div.querySelector('[data-cuenta]').textContent =
+      'Título en YouTube (' + t.length + '/' + TOPE_TITULO + ')' + (p.div._tituloManual ? ' — corregido a mano' : '');
+    p.div.querySelector('[data-cuenta]').className = largo ? 'no' : '';
+    edit.style.borderColor = largo ? '#F85149' : '';
+    p.div.querySelector('[data-largo]').textContent = largo
+      ? 'Pasa los ' + TOPE_TITULO + ' caracteres que acepta YouTube: corregilo acá arriba (por ejemplo, acortá un nombre).'
+      : '';
+    p.div.querySelector('[data-automatico]').hidden = !p.div._tituloManual;
     programarMiniatura(p.div);
   }
 }
 
 document.addEventListener('input', (e) => {
-  if (e.target.matches('input[data-campo], input[data-otro], #fecha, #torneo')) actualizarTitulos();
+  if (e.target.matches('[data-campo], input[data-otro], #fecha, #torneo')) actualizarTitulos();
 });
 
 // ---- Imagenes --------------------------------------------------------------------------
@@ -394,7 +507,7 @@ function abrirImagen(archivo) {
 // La misma que usa la app: biblioteca/indice/<tipo>/<clave> = nombre y
 // biblioteca/<tipo>/<clave>/img = imagen en base64.
 const CLUB_PROPIO = 'All Boys';
-const TEXTO_TIRA = 'Handball Femenino';
+const DEPORTE_MINI = 'Handball'; // abajo: "Handball Femenino - Torneo" segun la rama
 firebase.initializeApp({
   apiKey: 'AIzaSyBzvM1xcINIEK13awX72hHvwqwytlCgjyA',
   authDomain: 'marcavivo-ce14c.firebaseapp.com',
@@ -482,7 +595,9 @@ async function armarMiniatura(p) {
   const fecha = $('fecha').value.trim();
   const torneo = $('torneo').value.trim();
   const [fondoCategoria, propio, rival] = await Promise.all([
-    imagenBiblioteca('fondos', categoria),
+    // La foto de la categoria; si no tiene, la del grupo ("Infantiles" para "Infantiles C").
+    imagenBiblioteca('fondos', categoria)
+      .then((f) => f || imagenBiblioteca('fondos', categoria.split(' ')[0])),
     imagenBiblioteca('clubes', p.izq),
     imagenBiblioteca('clubes', p.der),
   ]);
@@ -506,7 +621,7 @@ async function armarMiniatura(p) {
   ctx.fillStyle = g; ctx.fillRect(0, 490, 1280, 230);
 
   texto(ctx, [categoria, fecha && 'Fecha ' + fecha].filter(Boolean).join(' - '), 72, 640, 36, false);
-  texto(ctx, [TEXTO_TIRA, torneo].filter(Boolean).join(' - '), 58, 640, 684, true);
+  texto(ctx, [DEPORTE_MINI + ' ' + (p.rama || 'Femenino'), torneo].filter(Boolean).join(' - '), 58, 640, 684, true);
   const cy = 370;
   if (propio) contener(ctx, propio, 350, cy, 290);
   if (rival) contener(ctx, rival, 930, cy, 290);
@@ -514,7 +629,7 @@ async function armarMiniatura(p) {
   const faltan = [];
   if (p.local.trim() && !propio) faltan.push('el escudo de "' + p.local.trim() + '"');
   if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
-  if (!fondo) faltan.push('la foto de fondo de "' + categoria + '"');
+  if (!fondo) faltan.push('la foto de fondo de "' + categoria + '" (o una para todo "' + categoria.split(' ')[0] + '")');
   const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
   return { blob, faltan };
 }
@@ -550,7 +665,7 @@ function buscarRival(texto, local) {
 function programarMiniatura(div) {
   const p = leerPartidos().find((x) => x.div === div);
   if (!p) return;
-  const firma = [p.categoria, p.local, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
+  const firma = [p.categoria, p.rama, p.local, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
   if (firma === div._firma) return;
   div._firma = firma;
   clearTimeout(div._espera);
@@ -798,9 +913,12 @@ async function pintarBiblioteca() {
     const gF = $('gFondos');
     gF.innerHTML = '';
     const conFoto = new Set(fondos.map(clave));
-    const nombres = [...CATEGORIAS, ...fondos.filter((f) => !CATEGORIAS.some((c) => clave(c) === clave(f)))];
+    // Primero una por grupo (sirve para todas sus categorias), despues las elegidas y las que ya
+    // tengan foto.
+    const nombres = [...new Set([...BASES, ...categoriasElegidas(),
+      ...fondos.filter((f) => !CATEGORIAS.concat(BASES).some((c) => clave(c) === clave(f)))])];
     for (const n of nombres) gF.appendChild(tarjetaBiblioteca('fondos', n, conFoto.has(clave(n))));
-    $('cuentaFondos').textContent = '(' + fondos.length + ' de ' + CATEGORIAS.length + ' categorías)';
+    $('cuentaFondos').textContent = '(' + fondos.length + ' cargadas)';
     contarSeleccion('clubes');
     contarSeleccion('fondos');
   } catch (e) {
@@ -950,7 +1068,10 @@ $('btnCrear').onclick = async () => {
     if (!p.categoria.trim()) return avisar(n + 'falta la categoría.', 'error');
     if (!p.local.trim()) return avisar(n + 'elegí el local.', 'error');
     if (!p.rival.trim()) return avisar(n + 'elegí el visitante.', 'error');
-    if (armarTitulo(p).length > TOPE_TITULO) return avisar(n + 'el título es muy largo.', 'error');
+    if (!tituloDe(p)) return avisar(n + 'falta el título.', 'error');
+    if (tituloDe(p).length > TOPE_TITULO) {
+      return avisar(n + 'el título pasa los ' + TOPE_TITULO + ' caracteres: corregilo en el partido.', 'error');
+    }
   }
 
   recordar('torneos', $('torneo').value);
@@ -959,7 +1080,7 @@ $('btnCrear').onclick = async () => {
   for (const p of partidos) {
     recordar('rivales', p.rival);
     if (!clave(p.local).includes(clave(CLUB_PROPIO))) recordar('rivales', p.local);
-    if (!CATEGORIAS.includes(p.categoria.trim())) recordar('categorias', p.categoria);
+    guardar('rama', p.rama);
   }
   llenarListas();
 
@@ -968,7 +1089,7 @@ $('btnCrear').onclick = async () => {
   const hechas = [];
   try {
     for (const [i, p] of partidos.entries()) {
-      const titulo = armarTitulo(p);
+      const titulo = tituloDe(p);
       avisar('Creando ' + (i + 1) + ' de ' + partidos.length + ': ' + titulo);
       const item = { titulo };
       try {
