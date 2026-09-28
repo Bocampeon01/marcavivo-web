@@ -53,6 +53,7 @@
   .pill { flex: 0 0 auto; padding: 8px 16px; font-weight: 700; }
   .pill.activo { background: #1565c0; border-color: #1565c0; color: #fff; }
   .pill:disabled { opacity: .5; }
+  button:disabled { opacity: .4; cursor: default; }
   .excl-tit { color: #98a2b3; font-size: 12px; letter-spacing: 1px; margin: 14px 0 6px; }
   .excl { display: flex; gap: 8px; }
   .excl .casilla { flex: 1; padding: 12px 4px; display: flex; align-items: center;
@@ -251,6 +252,8 @@ function pintar() {
     $('btnReloj').textContent = 'FINAL';
   }
   $('btnEspera').textContent = e.espera === 'ninguna' ? 'PANTALLA' : 'CAMARA';
+  // Con el reloj corriendo no se puede poner la pantalla (tapa el partido).
+  $('btnEspera').disabled = e.espera === 'ninguna' && e.corriendo;
   $('btnBanner').textContent = e.banner ? 'BANNER PUESTO' : 'BANNER';
   pintarTiempos(e);
   pintarExcl(e);
