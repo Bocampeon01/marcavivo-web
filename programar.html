@@ -124,9 +124,10 @@ const API = 'https://www.googleapis.com/youtube/v3';
 const CLUB = 'Handball All Boys';
 const TOPE_TITULO = 100; // YouTube no acepta titulos mas largos
 
-const CATEGORIAS = ['Mini F', 'Mini M', 'Infantiles F', 'Infantiles M', 'Menores F', 'Menores M',
-  'Cadetes F', 'Cadetes M', 'Juveniles F', 'Juveniles M', 'Junior F', 'Junior M',
-  'Primera F', 'Primera M'];
+// Cada categoria compite en dos tiras (F y B), menos Mayores y Mayores Desarrollo.
+const CATEGORIAS = ['Mini F', 'Mini B', 'Infantiles F', 'Infantiles B', 'Menores F', 'Menores B',
+  'Cadetas F', 'Cadetas B', 'Juveniles F', 'Juveniles B', 'Juniors F', 'Juniors B',
+  'Mayores', 'Mayores Desarrollo'];
 
 let token = null;
 const $ = (id) => document.getElementById(id);
