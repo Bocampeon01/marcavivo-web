@@ -66,6 +66,13 @@
   .nuevo { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
   .nuevo img { width: 56px; height: 56px; object-fit: contain; background: #1c2230; border-radius: 6px; }
   .faltan { color: #FFC107; font-size: 12px; margin-top: 4px; }
+  .seleccion { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .seleccion label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px;
+                     color: #E6EDF3; cursor: pointer; }
+  .seleccion input, .bibitem input[type=checkbox] { width: 18px; height: 18px; accent-color: #F85149; }
+  .bibitem .nombreSel { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .bibitem .nombreSel span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.peligro { background: #B62324; border-color: #F85149; }
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
@@ -122,6 +129,10 @@
         <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
         <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
       </p>
+      <div class="seleccion" data-seleccion="clubes">
+        <label><input type="checkbox" data-todos="clubes"> Seleccionar todos</label>
+        <button class="peligro chico" data-borrarsel="clubes" disabled>BORRAR SELECCIONADOS</button>
+      </div>
       <div class="bibgrilla" id="gEscudos"></div>
     </details>
     <details class="bib" id="bibFondos">
@@ -129,6 +140,10 @@
       <p style="color:#8B949E;font-size:13px">Cada foto se recorta sola a 16:9. En la miniatura se
         oscurece para que se lean los textos y se vean los escudos.</p>
       <input type="file" id="archivoFondo" accept="image/*" hidden>
+      <div class="seleccion" data-seleccion="fondos">
+        <label><input type="checkbox" data-todos="fondos"> Seleccionar todas las cargadas</label>
+        <button class="peligro chico" data-borrarsel="fondos" disabled>BORRAR SELECCIONADAS</button>
+      </div>
       <div class="bibgrilla" id="gFondos"></div>
     </details>
 
@@ -659,9 +674,17 @@ function tarjetaBiblioteca(tipo, nombre, cargado) {
   const d = document.createElement('div');
   d.className = 'bibitem' + (tipo === 'fondos' ? ' fondo' : '');
   d.innerHTML = '<div class="foto">' + (cargado ? '' : 'sin foto') + '</div>' +
-    '<div class="pie"><span></span><span></span></div>';
-  d.querySelector('.pie span').textContent = nombre;
-  const botones = d.querySelectorAll('.pie span')[1];
+    '<div class="pie"><label class="nombreSel">' +
+      (cargado ? '<input type="checkbox" data-sel="' + tipo + '">' : '') +
+      '<span></span></label><span></span></div>';
+  d.querySelector('.nombreSel span').textContent = tipo === 'clubes' ? sinPrefijo(nombre) : nombre;
+  d.querySelector('.nombreSel').title = nombre;
+  const casilla = d.querySelector('[data-sel]');
+  if (casilla) {
+    casilla.value = nombre;
+    casilla.onchange = () => contarSeleccion(tipo);
+  }
+  const botones = d.querySelector('.pie > span');
   if (cargado) {
     imagenBiblioteca(tipo, nombre).then((img) => {
       if (img) d.querySelector('.foto').appendChild(img.cloneNode());
@@ -706,6 +729,56 @@ function tarjetaBiblioteca(tipo, nombre, cargado) {
 
 let fondoPendiente = null;
 
+const casillasSel = (tipo) => [...document.querySelectorAll('input[data-sel="' + tipo + '"]')];
+
+function contarSeleccion(tipo) {
+  const todas = casillasSel(tipo);
+  const n = todas.filter((c) => c.checked).length;
+  const boton = document.querySelector('[data-borrarsel="' + tipo + '"]');
+  boton.disabled = n === 0;
+  const palabra = tipo === 'clubes' ? 'SELECCIONADOS' : 'SELECCIONADAS';
+  boton.textContent = n ? 'BORRAR ' + n + (n === 1 ? '' : ' ' + palabra) : 'BORRAR ' + palabra;
+  const todos = document.querySelector('[data-todos="' + tipo + '"]');
+  todos.checked = todas.length > 0 && n === todas.length;
+  todos.indeterminate = n > 0 && n < todas.length;
+}
+
+for (const t of document.querySelectorAll('[data-todos]')) {
+  t.onchange = () => {
+    for (const c of casillasSel(t.dataset.todos)) c.checked = t.checked;
+    contarSeleccion(t.dataset.todos);
+  };
+}
+
+for (const b of document.querySelectorAll('[data-borrarsel]')) {
+  b.onclick = async () => {
+    const tipo = b.dataset.borrarsel;
+    const nombres = casillasSel(tipo).filter((c) => c.checked).map((c) => c.value);
+    if (!nombres.length) return;
+    const que = tipo === 'clubes' ? (nombres.length === 1 ? 'escudo' : 'escudos')
+                                  : (nombres.length === 1 ? 'foto de fondo' : 'fotos de fondo');
+    if (!confirm('¿Borrar ' + nombres.length + ' ' + que + '? Se borran para todos los celulares.')) return;
+    b.disabled = true;
+    try {
+      await entrada;
+      // Todo junto en una sola escritura.
+      const cambios = {};
+      for (const n of nombres) {
+        cambios['indice/' + tipo + '/' + clave(n)] = null;
+        cambios[tipo + '/' + clave(n)] = null;
+        delete cacheImagenes[tipo + '/' + clave(n)];
+      }
+      await firebase.database().ref('biblioteca').update(cambios);
+      avisar('Listo: se borraron ' + nombres.length + ' ' + que + '.', 'bien');
+      await pintarBiblioteca();
+      await sumarClubes();
+      rearmarMiniaturas();
+    } catch (e) {
+      avisar('No se pudo borrar: ' + (e.message || e), 'error');
+    }
+  };
+}
+
 async function pintarBiblioteca() {
   try {
     const [clubes, fondos] = await Promise.all([indiceBiblioteca('clubes'), indiceBiblioteca('fondos')]);
@@ -728,6 +801,8 @@ async function pintarBiblioteca() {
     const nombres = [...CATEGORIAS, ...fondos.filter((f) => !CATEGORIAS.some((c) => clave(c) === clave(f)))];
     for (const n of nombres) gF.appendChild(tarjetaBiblioteca('fondos', n, conFoto.has(clave(n))));
     $('cuentaFondos').textContent = '(' + fondos.length + ' de ' + CATEGORIAS.length + ' categorías)';
+    contarSeleccion('clubes');
+    contarSeleccion('fondos');
   } catch (e) {
     avisar('No se pudo leer la biblioteca de fondos y escudos: ' + (e.message || e), 'error');
   }
