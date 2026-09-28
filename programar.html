@@ -571,7 +571,7 @@ function contener(ctx, i, cx, cy, lado) {
 const OPACIDAD_ESCUDOS = 0.7;
 
 // Texto centrado; si no entra a lo ancho se achica. y es el borde de arriba (o de abajo).
-function texto(ctx, t, tam, cx, y, desdeAbajo) {
+function texto(ctx, t, tam, cx, y, desdeAbajo, color = '#fff') {
   if (!t) return;
   let s = tam;
   do {
@@ -580,10 +580,13 @@ function texto(ctx, t, tam, cx, y, desdeAbajo) {
     s -= 4;
   } while (true);
   ctx.save();
-  ctx.fillStyle = '#fff';
-  ctx.shadowColor = '#000';
-  ctx.shadowBlur = 12;
-  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = color;
+  // Sombra solo para el texto blanco (sobre la foto); el negro va sobre blanco.
+  if (color === '#fff') {
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 3;
+  }
   ctx.textAlign = 'center';
   ctx.textBaseline = desdeAbajo ? 'bottom' : 'top';
   ctx.fillText(t, cx, y);
@@ -605,31 +608,36 @@ async function armarMiniatura(p) {
   const c = document.createElement('canvas');
   c.width = 1280; c.height = 720;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#0D2B4E';
-  ctx.fillRect(0, 0, 1280, 720);
   if (fondo) {
     cubrir(ctx, fondo, 1280, 720);
     // La foto se oscurece entera: que se lean los textos y resalten los escudos.
     ctx.fillStyle = 'rgba(0,0,0,.4)';
     ctx.fillRect(0, 0, 1280, 720);
+    let g = ctx.createLinearGradient(0, 0, 0, 210);
+    g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 210);
+    g = ctx.createLinearGradient(0, 490, 0, 720);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.9)');
+    ctx.fillStyle = g; ctx.fillRect(0, 490, 1280, 230);
+  } else {
+    // Sin foto: colores de All Boys. Marco negro grueso (textos en blanco) y rectangulo
+    // blanco en el medio (escudos y VS en negro). Igual que en la app.
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, 1280, 720);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(70, 150, 1140, 420);
   }
-  let g = ctx.createLinearGradient(0, 0, 0, 210);
-  g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 210);
-  g = ctx.createLinearGradient(0, 490, 0, 720);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.9)');
-  ctx.fillStyle = g; ctx.fillRect(0, 490, 1280, 230);
 
   texto(ctx, [categoria, fecha && 'Fecha ' + fecha].filter(Boolean).join(' - '), 72, 640, 36, false);
   texto(ctx, [DEPORTE_MINI + ' ' + (p.rama || 'Femenino'), torneo].filter(Boolean).join(' - '), 58, 640, 684, true);
   const cy = 370;
   if (propio) contener(ctx, propio, 350, cy, 290);
   if (rival) contener(ctx, rival, 930, cy, 290);
-  if (propio || rival) texto(ctx, 'VS', 96, 640, cy - 60, false);
+  if (propio || rival) texto(ctx, 'VS', 96, 640, cy - 60, false, fondo ? '#fff' : '#000');
   const faltan = [];
   if (p.local.trim() && !propio) faltan.push('el escudo de "' + p.local.trim() + '"');
   if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
-  if (!fondo) faltan.push('la foto de fondo de "' + categoria + '" (o una para todo "' + categoria.split(' ')[0] + '")');
+  // Sin foto no falta nada: va con los colores del club.
   const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
   return { blob, faltan };
 }
