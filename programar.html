@@ -116,8 +116,8 @@
       <summary>Escudos de los clubes <span id="cuentaEscudos" style="color:#8B949E;font-weight:400"></span></summary>
       <p style="color:#8B949E;font-size:13px">Elegí uno o varios archivos: <strong>se guardan
         solos</strong>, con el nombre del archivo (✎ para cambiarlo) y sin márgenes de sobra. En cada
-        partido, al elegir Local y Visitante de la lista, sus escudos se ponen solos en la miniatura
-        (local a la izquierda, visitante a la derecha).</p>
+        partido, Local y Visitante se eligen de la lista de clubes cargados: sus escudos se ponen solos
+        en la miniatura (local a la izquierda, visitante a la derecha).</p>
       <p class="acciones">
         <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
         <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
@@ -264,8 +264,10 @@ function agregarPartido(desde) {
     '<div class="partido">' +
       '<div><label>Hora</label><input type="time" data-campo="hora" step="300"></div>' +
       '<div><label>Categoría</label><input data-campo="categoria" list="listaCategorias" placeholder="Ej: Infantiles F"></div>' +
-      '<div class="equipo"><label>Local</label><input data-campo="local" list="listaRivales" placeholder="Ej: All Boys"></div>' +
-      '<div class="equipo"><label>Visitante</label><input data-campo="rival" list="listaRivales" placeholder="Ej: Circulo Gral Belgrano"></div>' +
+      '<div class="equipo"><label>Local</label><select data-equipo="local"></select>' +
+        '<input data-otro="local" placeholder="Nombre del club" hidden style="margin-top:6px"></div>' +
+      '<div class="equipo"><label>Visitante</label><select data-equipo="rival"></select>' +
+        '<input data-otro="rival" placeholder="Nombre del club" hidden style="margin-top:6px"></div>' +
     '</div>' +
     '<div class="titulo" data-titulo></div>' +
     '<div class="mini">' +
@@ -273,8 +275,16 @@ function agregarPartido(desde) {
       '<div class="faltan" data-faltan></div>' +
     '</div>';
   $('partidos').appendChild(div);
-  // Casi siempre somos locales: arranca con All Boys y se cambia si no.
-  div.querySelector('[data-campo="local"]').value = desde?.local || CLUB_PROPIO;
+  // Casi siempre somos locales: arranca con All Boys (o con el local del partido anterior).
+  div._localInicial = desde ? desde.local : null;
+  llenarEquipos(div);
+  for (const sel of div.querySelectorAll('[data-equipo]')) {
+    sel.onchange = () => {
+      // "Otro club": se escribe el nombre a mano (sale sin escudo).
+      div.querySelector('[data-otro="' + sel.dataset.equipo + '"]').hidden = sel.value !== OTRO;
+      actualizarTitulos();
+    };
+  }
 
   // El siguiente arranca una hora despues del anterior, con la misma categoria vacia.
   if (desde?.hora) {
@@ -289,14 +299,51 @@ function agregarPartido(desde) {
   actualizarTitulos();
 }
 
+const OTRO = '__otro__';
+
+// Equipo elegido en la lista (nombre del escudo) o escrito a mano con "Otro club".
+function equipo(div, lado) {
+  const v = div.querySelector('[data-equipo="' + lado + '"]').value;
+  return v === OTRO ? div.querySelector('[data-otro="' + lado + '"]').value : v;
+}
+
+// Las dos listas con todos los clubes que tienen escudo cargado.
+function llenarEquipos(div) {
+  const clubes = [...clubesCargados].sort((a, b) => sinPrefijo(a).localeCompare(sinPrefijo(b)));
+  const opciones = '<option value="">— elegir —</option>' +
+    clubes.map((n) => '<option value="' + escapar(n) + '">' + escapar(sinPrefijo(n)) + '</option>').join('') +
+    '<option value="' + OTRO + '">Otro club (sin escudo)…</option>';
+  for (const sel of div.querySelectorAll('[data-equipo]')) {
+    if (sel._opciones === opciones) continue;
+    const antes = sel.value;
+    sel.innerHTML = opciones;
+    sel._opciones = opciones;
+    let valor = antes;
+    if (!valor && sel.dataset.equipo === 'local') {
+      valor = div._localInicial != null ? div._localInicial : buscarClub(CLUB_PROPIO);
+    }
+    if (valor && valor !== OTRO && !clubes.includes(valor)) {
+      // Escrito a mano antes: queda como "Otro club".
+      div.querySelector('[data-otro="' + sel.dataset.equipo + '"]').value = valor;
+      valor = OTRO;
+    }
+    sel.value = valor || '';
+    div.querySelector('[data-otro="' + sel.dataset.equipo + '"]').hidden = sel.value !== OTRO;
+  }
+}
+
 function leerPartidos() {
   return [...$('partidos').children].map((div) => {
     const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
-    // El escudo de cada lado sale del equipo elegido (local a la izquierda).
-    const izq = buscarClub(campo('local'));
+    const local = equipo(div, 'local'), rival = equipo(div, 'rival');
+    // El escudo de cada lado es el del club elegido en la lista (local a la izquierda).
+    // Con "Otro club" no hay escudo.
+    const deLista = (lado) => {
+      const v = div.querySelector('[data-equipo="' + lado + '"]').value;
+      return v === OTRO ? '' : v;
+    };
     return { div, hora: campo('hora'), categoria: campo('categoria'),
-             local: campo('local'), rival: campo('rival'),
-             izq, der: buscarRival(campo('rival'), izq),
+             local, rival, izq: deLista('local'), der: deLista('rival'),
              mini: div._armada || null };
   });
 }
@@ -314,7 +361,7 @@ function actualizarTitulos() {
 }
 
 document.addEventListener('input', (e) => {
-  if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
+  if (e.target.matches('input[data-campo], input[data-otro], #fecha, #torneo')) actualizarTitulos();
 });
 
 // ---- Imagenes --------------------------------------------------------------------------
@@ -588,6 +635,7 @@ async function borrarDeBiblioteca(tipo, nombre) {
 // Rearma todas las miniaturas (despues de cargar o borrar algo).
 function rearmarMiniaturas() {
   for (const div of $('partidos').children) {
+    llenarEquipos(div);
     div._firma = '';
     programarMiniatura(div);
   }
@@ -819,8 +867,8 @@ $('btnCrear').onclick = async () => {
     const n = 'Partido ' + (i + 1) + ': ';
     if (!p.hora) return avisar(n + 'falta la hora.', 'error');
     if (!p.categoria.trim()) return avisar(n + 'falta la categoría.', 'error');
-    if (!p.local.trim()) return avisar(n + 'falta el local.', 'error');
-    if (!p.rival.trim()) return avisar(n + 'falta el visitante.', 'error');
+    if (!p.local.trim()) return avisar(n + 'elegí el local.', 'error');
+    if (!p.rival.trim()) return avisar(n + 'elegí el visitante.', 'error');
     if (armarTitulo(p).length > TOPE_TITULO) return avisar(n + 'el título es muy largo.', 'error');
   }
 
