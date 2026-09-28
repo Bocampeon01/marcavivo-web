@@ -66,6 +66,10 @@
   .nuevo { display: flex; gap: 10px; align-items: center; margin: 6px 0; }
   .nuevo img { width: 56px; height: 56px; object-fit: contain; background: #1c2230; border-radius: 6px; }
   .faltan { color: #FFC107; font-size: 12px; margin-top: 4px; }
+  .lados { display: flex; gap: 8px; align-items: end; margin-top: 8px; flex-wrap: wrap; }
+  .lados label { margin: 0; }
+  .lados select { width: auto; min-width: 150px; }
+  .lados .vs { font-weight: 900; padding-bottom: 8px; }
   footer { color: #8B949E; font-size: 12px; padding: 24px 18px; text-align: center; }
   @media (max-width: 640px) {
     .partido { grid-template-columns: 1fr 1fr; }
@@ -114,16 +118,13 @@
     <h2>Fondos y escudos</h2>
     <details class="bib" id="bibEscudos">
       <summary>Escudos de los clubes <span id="cuentaEscudos" style="color:#8B949E;font-weight:400"></span></summary>
-      <p style="color:#8B949E;font-size:13px">El del rival se busca por el nombre que se pone en
-        "Rival". Podés elegir varios archivos juntos; les sacamos los márgenes de sobra solos.</p>
+      <p style="color:#8B949E;font-size:13px">Elegí uno o varios archivos: <strong>se guardan
+        solos</strong>, con el nombre del archivo (✎ para cambiarlo) y sin márgenes de sobra. En cada
+        partido, el de All Boys va a la izquierda y el del rival a la derecha: se eligen solos por el
+        nombre y se pueden cambiar a mano.</p>
       <p class="acciones">
         <button class="suave" id="btnElegirEscudos">+ AGREGAR ESCUDOS</button>
         <input type="file" id="archivosEscudos" accept="image/*" multiple hidden>
-      </p>
-      <div id="nuevosEscudos"></div>
-      <p class="acciones" id="guardarEscudosFila" hidden>
-        <button id="btnGuardarEscudos">GUARDAR ESCUDOS</button>
-        <button class="suave" id="btnCancelarEscudos">CANCELAR</button>
       </p>
       <div class="bibgrilla" id="gEscudos"></div>
     </details>
@@ -261,7 +262,12 @@ function agregarPartido(desde) {
     '<div class="titulo" data-titulo></div>' +
     '<div class="mini">' +
       '<img data-vista alt="Miniatura">' +
-      '<div><label>Otra foto de fondo solo para este partido (opcional)</label>' +
+      '<div><div class="lados">' +
+          '<label>Escudo izquierda<select data-lado="izq"></select></label>' +
+          '<span class="vs">VS</span>' +
+          '<label>Escudo derecha<select data-lado="der"></select></label>' +
+        '</div>' +
+        '<label style="margin-top:10px">Otra foto de fondo solo para este partido (opcional)</label>' +
         '<input type="file" accept="image/*" data-archivo>' +
         '<button class="suave chico" data-sacarmini hidden>USAR LA DE LA CATEGORÍA</button>' +
         '<div class="faltan" data-faltan></div></div>' +
@@ -288,6 +294,14 @@ function agregarPartido(desde) {
     div._firma = '';
     programarMiniatura(div);
   };
+  for (const sel of div.querySelectorAll('[data-lado]')) {
+    // Elegido a mano: queda fijo (hasta que se cambie el rival).
+    sel.onchange = () => {
+      div['_' + sel.dataset.lado] = sel.value;
+      div._firma = '';
+      programarMiniatura(div);
+    };
+  }
   div.querySelector('[data-sacarmini]').onclick = (e) => {
     div._fondoPropio = null;
     div.querySelector('[data-archivo]').value = '';
@@ -302,6 +316,8 @@ function leerPartidos() {
   return [...$('partidos').children].map((div) => {
     const campo = (n) => div.querySelector('[data-campo="' + n + '"]').value;
     return { div, hora: campo('hora'), categoria: campo('categoria'), rival: campo('rival'),
+             izq: div._izq !== undefined ? div._izq : buscarClub(CLUB_PROPIO),
+             der: div._der !== undefined ? div._der : buscarRival(campo('rival')),
              mini: div._armada || null };
   });
 }
@@ -319,6 +335,8 @@ function actualizarTitulos() {
 }
 
 document.addEventListener('input', (e) => {
+  // Otro rival: el escudo de la derecha se vuelve a buscar solo.
+  if (e.target.matches('input[data-campo="rival"]')) delete e.target.closest('.tarjeta')._der;
   if (e.target.matches('input[data-campo], #fecha, #torneo')) actualizarTitulos();
 });
 
@@ -420,8 +438,8 @@ async function armarMiniatura(p) {
   const torneo = $('torneo').value.trim();
   const [fondoCategoria, propio, rival] = await Promise.all([
     imagenBiblioteca('fondos', categoria),
-    imagenBiblioteca('clubes', CLUB_PROPIO),
-    imagenBiblioteca('clubes', p.rival),
+    imagenBiblioteca('clubes', p.izq),
+    imagenBiblioteca('clubes', p.der),
   ]);
   const fondo = p.div?._fondoPropio || fondoCategoria;
   const c = document.createElement('canvas');
@@ -451,16 +469,56 @@ async function armarMiniatura(p) {
   const faltan = [];
   if (!propio) faltan.push('el escudo de ' + CLUB_PROPIO);
   if (p.rival.trim() && !rival) faltan.push('el escudo de "' + p.rival.trim() + '"');
+  // (si no aparece solo, se puede elegir en "Escudo derecha")
   if (!fondo) faltan.push('la foto de fondo de "' + categoria + '"');
   const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
   return { blob, faltan };
+}
+
+// Nombres de los escudos cargados (se actualiza al leer la biblioteca).
+let clubesCargados = [];
+
+// Busca el escudo que corresponde a [texto]: igual, uno contiene al otro, o el que mas
+// palabras comparte ("C Gral Belgrano" encuentra "Circulo Gral Belgrano").
+function buscarClub(texto, lista = clubesCargados) {
+  const k = clave(texto);
+  if (!k) return '';
+  let m = lista.find((n) => clave(n) === k);
+  if (m) return m;
+  m = lista.find((n) => clave(n).includes(k) || k.includes(clave(n)));
+  if (m) return m;
+  const palabras = (t) => clave(t).split('_').filter((w) => w.length > 2);
+  const buscadas = palabras(texto);
+  let mejor = '', puntos = 0;
+  for (const n of lista) {
+    const c = buscadas.filter((w) => palabras(n).includes(w)).length;
+    if (c > puntos) { puntos = c; mejor = n; }
+  }
+  return mejor;
+}
+
+// El del rival, sin confundirlo con el nuestro.
+function buscarRival(texto) {
+  const propio = buscarClub(CLUB_PROPIO);
+  return buscarClub(texto, clubesCargados.filter((n) => n !== propio));
+}
+
+function llenarLados(div, p) {
+  const opciones = '<option value="">— ninguno —</option>' +
+    [...clubesCargados].sort((a, b) => a.localeCompare(b))
+      .map((n) => '<option value="' + escapar(n) + '">' + escapar(n) + '</option>').join('');
+  for (const sel of div.querySelectorAll('[data-lado]')) {
+    if (sel._opciones !== opciones) { sel.innerHTML = opciones; sel._opciones = opciones; }
+    sel.value = p[sel.dataset.lado] || '';
+  }
 }
 
 // Rearma la miniatura de un partido un rato despues de dejar de escribir.
 function programarMiniatura(div) {
   const p = leerPartidos().find((x) => x.div === div);
   if (!p) return;
-  const firma = [p.categoria, p.rival, $('fecha').value, $('torneo').value].join('|');
+  llenarLados(div, p);
+  const firma = [p.categoria, p.rival, p.izq, p.der, $('fecha').value, $('torneo').value].join('|');
   if (firma === div._firma) return;
   div._firma = firma;
   clearTimeout(div._espera);
@@ -604,6 +662,14 @@ function tarjetaBiblioteca(tipo, nombre, cargado) {
       }
     };
     botones.appendChild(borrar);
+    if (tipo === 'clubes') {
+      const renombrar = document.createElement('button');
+      renombrar.className = 'suave chico';
+      renombrar.textContent = '✎';
+      renombrar.title = 'Cambiar el nombre';
+      renombrar.onclick = () => renombrarEscudo(nombre);
+      botones.prepend(renombrar);
+    }
   }
   if (tipo === 'fondos') {
     const cargar = document.createElement('button');
@@ -624,9 +690,10 @@ let fondoPendiente = null;
 async function pintarBiblioteca() {
   try {
     const [clubes, fondos] = await Promise.all([indiceBiblioteca('clubes'), indiceBiblioteca('fondos')]);
+    clubesCargados = clubes;
     const gE = $('gEscudos');
     gE.innerHTML = '';
-    if (!clubes.some((n) => clave(n) === clave(CLUB_PROPIO))) {
+    if (!buscarClub(CLUB_PROPIO)) {
       const aviso = document.createElement('div');
       aviso.className = 'faltan';
       aviso.textContent = 'Falta el escudo de ' + CLUB_PROPIO + ': va en todas las miniaturas. ' +
@@ -663,66 +730,57 @@ $('archivoFondo').onchange = async (e) => {
   }
 };
 
-let escudosNuevos = [];
-
 $('btnElegirEscudos').onclick = () => { $('archivosEscudos').value = ''; $('archivosEscudos').click(); };
 $('archivosEscudos').onchange = async (e) => {
-  for (const f of [...e.target.files]) {
-    const img = await abrirImagen(f);
-    if (img) escudosNuevos.push({ img, nombre: nombreDeArchivo(f.name) });
+  const archivos = [...e.target.files];
+  let listos = 0;
+  const malos = [];
+  for (const f of archivos) {
+    const nombre = nombreDeArchivo(f.name);
+    avisar('Guardando ' + (listos + 1) + ' de ' + archivos.length + ': ' + nombre + '...');
+    try {
+      const img = await abrirImagen(f);
+      if (!img) throw new Error('no es una imagen');
+      await guardarEnBiblioteca('clubes', nombre, await prepararEscudo(img));
+      listos++;
+    } catch (err) {
+      malos.push(f.name + ' (' + (err.message || err) + ')');
+    }
   }
-  pintarNuevos();
+  await pintarBiblioteca();
+  await sumarClubes();
+  rearmarMiniaturas();
+  avisar((listos === 1 ? 'Se guardó 1 escudo' : 'Se guardaron ' + listos + ' escudos') +
+    ' para todos.' + (malos.length ? ' No se pudo con: ' + malos.join(', ') : '') +
+    ' Revisá los nombres (✎) si hace falta.', malos.length ? 'error' : 'bien');
 };
 
-function pintarNuevos() {
-  const cont = $('nuevosEscudos');
-  cont.innerHTML = '';
-  escudosNuevos.forEach((n, i) => {
-    const d = document.createElement('div');
-    d.className = 'nuevo';
-    d.innerHTML = '<img alt=""><input list="listaRivales" style="max-width:320px">' +
-      '<button class="suave chico">✕</button>';
-    d.querySelector('img').src = n.img.src;
-    const campo = d.querySelector('input');
-    campo.value = n.nombre;
-    campo.oninput = () => { n.nombre = campo.value; };
-    d.querySelector('button').onclick = () => { escudosNuevos.splice(i, 1); pintarNuevos(); };
-    cont.appendChild(d);
-  });
-  $('guardarEscudosFila').hidden = escudosNuevos.length === 0;
-  if (escudosNuevos.length) {
-    const ayuda = document.createElement('p');
-    ayuda.style.cssText = 'color:#8B949E;font-size:12px;margin:4px 0';
-    ayuda.textContent = 'Revisá los nombres: tienen que ser iguales a como se escribe el rival ' +
-      '(el nuestro, "' + CLUB_PROPIO + '").';
-    cont.prepend(ayuda);
-  }
-}
-
-$('btnCancelarEscudos').onclick = () => { escudosNuevos = []; pintarNuevos(); };
-$('btnGuardarEscudos').onclick = async () => {
-  const faltaNombre = escudosNuevos.find((n) => !clave(n.nombre));
-  if (faltaNombre) return avisar('Hay un escudo sin nombre.', 'error');
-  $('btnGuardarEscudos').disabled = true;
-  let listos = 0;
+// Cambia el nombre de un escudo: se copia la imagen a la clave nueva y se borra la vieja.
+async function renombrarEscudo(viejo) {
+  const nuevo = (prompt('Nombre del club (igual a como se escribe el rival; el nuestro, "' +
+    CLUB_PROPIO + '"):', viejo) || '').trim();
+  if (!nuevo || nuevo === viejo) return;
   try {
-    for (const n of escudosNuevos) {
-      avisar('Guardando ' + (listos + 1) + ' de ' + escudosNuevos.length + ': ' + n.nombre + '...');
-      await guardarEnBiblioteca('clubes', n.nombre, await prepararEscudo(n.img));
-      listos++;
-    }
-    avisar(listos === 1 ? 'Listo: se guardó el escudo para todos.' : 'Listo: se guardaron ' + listos + ' escudos para todos.', 'bien');
-    escudosNuevos = [];
-    pintarNuevos();
+    await entrada;
+    const snap = await firebase.database().ref('biblioteca/clubes/' + clave(viejo) + '/img').get();
+    if (!snap.val()) throw new Error('no se encontró la imagen');
+    await firebase.database().ref('biblioteca').update({
+      ['indice/clubes/' + clave(viejo)]: null,
+      ['clubes/' + clave(viejo)]: null,
+      ['indice/clubes/' + clave(nuevo)]: nuevo,
+      ['clubes/' + clave(nuevo)]: {
+        nombre: nuevo, img: snap.val(), fecha: firebase.database.ServerValue.TIMESTAMP,
+      },
+    });
+    delete cacheImagenes['clubes/' + clave(viejo)];
+    delete cacheImagenes['clubes/' + clave(nuevo)];
     await pintarBiblioteca();
     await sumarClubes();
     rearmarMiniaturas();
   } catch (e) {
-    avisar('Se guardaron ' + listos + '. Falló uno: ' + (e.message || e), 'error');
-  } finally {
-    $('btnGuardarEscudos').disabled = false;
+    avisar('No se pudo cambiar el nombre: ' + (e.message || e), 'error');
   }
-};
+}
 
 // Los clubes con escudo cargado tambien se sugieren como rival.
 async function sumarClubes() {
@@ -866,7 +924,8 @@ $('btnCrear').onclick = async () => {
   llenarListas();
   agregarPartido();
   sumarClubes();
-  pintarBiblioteca();
+  // Con la lista de escudos ya leida, se eligen solos los de cada partido.
+  pintarBiblioteca().then(rearmarMiniaturas);
 })();
 </script>
 </body>
