@@ -151,8 +151,7 @@
     <details class="bib" id="bibFondos">
       <summary>Fotos de fondo por categoría <span id="cuentaFondos" style="color:#8B949E;font-weight:400"></span></summary>
       <p style="color:#8B949E;font-size:13px">Cada foto se recorta sola a 16:9. En la miniatura se
-        oscurece para que se lean los textos y se vean los escudos. La de un grupo ("Infantiles")
-        se usa para todas sus categorías que no tengan una propia.</p>
+        oscurece para que se lean los textos y se vean los escudos.</p>
       <input type="file" id="archivoFondo" accept="image/*" hidden>
       <div class="seleccion" data-seleccion="fondos">
         <label><input type="checkbox" data-todos="fondos"> Seleccionar todas las cargadas</label>
@@ -921,9 +920,9 @@ async function pintarBiblioteca() {
     const gF = $('gFondos');
     gF.innerHTML = '';
     const conFoto = new Set(fondos.map(clave));
-    // Primero una por grupo (sirve para todas sus categorias), despues las elegidas y las que ya
-    // tengan foto.
-    const nombres = [...new Set([...BASES, ...categoriasElegidas(),
+    // Las categorias elegidas y las que ya tengan foto. Los grupos sueltos ("Infantiles") ya no
+    // se ofrecen: solo aparecen si les quedo una foto cargada de antes, para poder borrarla.
+    const nombres = [...new Set([...BASES.filter((b) => conFoto.has(clave(b))), ...categoriasElegidas(),
       ...fondos.filter((f) => !CATEGORIAS.concat(BASES).some((c) => clave(c) === clave(f)))])];
     for (const n of nombres) gF.appendChild(tarjetaBiblioteca('fondos', n, conFoto.has(clave(n))));
     $('cuentaFondos').textContent = '(' + fondos.length + ' cargadas)';
