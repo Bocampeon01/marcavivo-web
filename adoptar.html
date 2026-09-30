@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MarcaVivo - Adoptar transmisión</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0D1117; color: #E6EDF3; line-height: 1.5;
+         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { background: #0D2B4E; padding: 14px 18px; }
+  h1 { margin: 0; font-size: 20px; }
+  h1 span { color: #FFC107; }
+  main { padding: 16px; max-width: 720px; margin: 0 auto; }
+  h2 { font-size: 16px; margin: 24px 0 8px; border-bottom: 1px solid #263141; padding-bottom: 6px; }
+  p { margin: 8px 0; }
+  .nota { color: #8B949E; font-size: 14px; }
+  button { font: inherit; font-weight: 600; border-radius: 10px; padding: 14px 18px; cursor: pointer;
+           border: 1px solid #2F81F7; background: #1F6FEB; color: #fff; width: 100%; font-size: 16px; }
+  button.suave { background: transparent; color: #58A6FF; }
+  button.verde { background: #238636; border-color: #2EA043; }
+  button:disabled { opacity: .5; cursor: default; }
+  .fila { display: flex; gap: 8px; margin-top: 10px; }
+  .fila button { width: auto; flex: 1; }
+  .opcion { display: flex; gap: 12px; align-items: flex-start; background: #161B22; border: 1px solid #30363D;
+            border-radius: 10px; padding: 12px; margin-bottom: 8px; cursor: pointer; }
+  .opcion:has(input:checked) { border-color: #2F81F7; background: #12233D; }
+  .opcion input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: #1F6FEB; }
+  .opcion b { display: block; word-break: break-word; }
+  .opcion small { color: #8B949E; }
+  .etiqueta { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+              background: #3B2A05; color: #FFC107; margin-left: 4px; }
+  .aviso { padding: 10px 12px; border-radius: 8px; margin: 10px 0; background: #12233D; border: 1px solid #2F81F7; }
+  .aviso.error { background: #3D1214; border-color: #F85149; }
+  .aviso.ok { background: #0F2D1A; border-color: #2EA043; }
+  .tilde { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; color: #C9D1D9; font-size: 14px; }
+  .tilde input { width: 20px; height: 20px; flex: none; accent-color: #1F6FEB; margin-top: 2px; }
+  .link { word-break: break-all; color: #58A6FF; font-weight: 600; }
+  ol { padding-left: 20px; } li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<header><h1>MarcaVivo <span>· Adoptar transmisión</span></h1></header>
+<main>
+  <div id="mensaje"></div>
+
+  <section id="entrada">
+    <p>Sirve cuando se transmitió con la <strong>app de YouTube del celular</strong> (la que crea una transmisión
+      nueva llamada <em>"Handball All Boys está en vivo"</em>) y el partido estaba programado aparte.</p>
+    <p>Esta página le pone a la transmisión que está al aire el <strong>título, la descripción y la miniatura</strong>
+      de la programada del partido, y te da el <strong>link para mandar</strong>.</p>
+    <button id="btnEntrar">ENTRAR CON GOOGLE</button>
+    <p class="nota">Entrá con la cuenta del canal. No se guarda nada de tu cuenta.</p>
+  </section>
+
+  <section id="panel" hidden>
+    <h2>1. ¿Cuál es el partido?</h2>
+    <div id="listaProgramadas"><p class="nota">Buscando…</p></div>
+
+    <h2>2. ¿Qué transmisión está al aire?</h2>
+    <div id="listaVivos"><p class="nota">Buscando…</p></div>
+
+    <label class="tilde">
+      <input type="checkbox" id="borrar" checked>
+      <span>Borrar la programada vacía del partido, para que nadie entre a un link que nunca sale en vivo.
+        <strong>Su link deja de andar</strong>: hay que mandar el nuevo.</span>
+    </label>
+
+    <button id="btnAdoptar" class="verde" disabled>ADOPTAR</button>
+    <div id="resultado"></div>
+    <div class="fila"><button id="btnActualizar" class="suave">ACTUALIZAR LISTAS</button></div>
+  </section>
+</main>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const CLIENT_ID = '500924512787-5lbgk6c3ig7g75ibm7fbqsea5n3c7l2i.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/youtube';
+const API = 'https://www.googleapis.com/youtube/v3';
+const TOPE_TITULO = 100;
+
+let token = null;
+let programadas = [];
+let vivos = [];
+
+function escapar(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+function avisar(texto, tipo) {
+  $('mensaje').innerHTML = texto ? '<div class="aviso ' + (tipo || '') + '">' + escapar(texto) + '</div>' : '';
+  if (texto) window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function cuando(iso) {
+  if (!iso) return 'sin fecha';
+  return new Date(iso).toLocaleString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+// ---- Entrada ---------------------------------------------------------------------------
+$('btnEntrar').onclick = () => {
+  if (!window.google) return avisar('Todavía no cargó Google. Esperá unos segundos y probá de nuevo.', 'error');
+  google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: (r) => {
+      if (r.error) return avisar('No se pudo entrar: ' + r.error, 'error');
+      token = r.access_token;
+      $('entrada').hidden = true;
+      $('panel').hidden = false;
+      avisar('');
+      cargar();
+    },
+  }).requestAccessToken();
+};
+
+// ---- API -------------------------------------------------------------------------------
+async function llamar(url, opciones = {}) {
+  const r = await fetch(url, {
+    ...opciones,
+    headers: { Authorization: 'Bearer ' + token, ...(opciones.headers || {}) },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = j.error || {};
+    const motivo = e.errors?.[0]?.reason || '';
+    throw new Error((e.message || r.status) + (motivo ? ' (' + motivo + ')' : ''));
+  }
+  return j;
+}
+async function listar(estado) {
+  const j = await llamar(API + '/liveBroadcasts?part=snippet,status,contentDetails&broadcastStatus=' +
+    estado + '&maxResults=50');
+  return j.items || [];
+}
+
+// ---- Listas ----------------------------------------------------------------------------
+function dibujarLista(div, nombre, items, detalle, preseleccionar) {
+  if (!items.length) { div.innerHTML = '<p class="nota">No hay ninguna.</p>'; return; }
+  div.innerHTML = items.map((b, i) =>
+    '<label class="opcion"><input type="radio" name="' + nombre + '" value="' + escapar(b.id) + '"' +
+    (preseleccionar && i === 0 ? ' checked' : '') + '><span><b>' + escapar(b.snippet.title) + '</b>' +
+    '<small>' + detalle(b) + '</small></span></label>').join('');
+  div.querySelectorAll('input').forEach((x) => { x.onchange = revisarBoton; });
+}
+
+async function cargar(limpiar = true) {
+  $('btnActualizar').disabled = true;
+  if (limpiar) $('resultado').innerHTML = '';
+  try {
+    const [prox, aire] = await Promise.all([listar('upcoming'), listar('active')]);
+    vivos = aire.sort((a, b) => (b.snippet.actualStartTime || '').localeCompare(a.snippet.actualStartTime || ''));
+    const idsVivos = new Set(vivos.map((v) => v.id));
+    programadas = prox.filter((b) => !idsVivos.has(b.id))
+      .sort((a, b) => (a.snippet.scheduledStartTime || '').localeCompare(b.snippet.scheduledStartTime || ''));
+    // La programada mas cercana a ahora va primera (y marcada).
+    const ahora = Date.now();
+    programadas.sort((a, b) => Math.abs(new Date(a.snippet.scheduledStartTime) - ahora) -
+      Math.abs(new Date(b.snippet.scheduledStartTime) - ahora));
+    dibujarLista($('listaProgramadas'), 'prog', programadas,
+      (b) => cuando(b.snippet.scheduledStartTime) + ' · ' + escapar(b.status.privacyStatus), false);
+    dibujarLista($('listaVivos'), 'vivo', vivos,
+      (b) => 'Empezó ' + cuando(b.snippet.actualStartTime || b.snippet.scheduledStartTime) +
+        (/está en vivo/i.test(b.snippet.title) ? '<span class="etiqueta">APP DE YOUTUBE</span>' : ''), true);
+  } catch (e) {
+    avisar('No se pudieron leer las transmisiones: ' + e.message, 'error');
+  } finally {
+    $('btnActualizar').disabled = false;
+    revisarBoton();
+  }
+}
+$('btnActualizar').onclick = () => cargar();
+
+const elegido = (nombre) => document.querySelector('input[name="' + nombre + '"]:checked')?.value;
+function revisarBoton() { $('btnAdoptar').disabled = !(elegido('prog') && elegido('vivo')); }
+
+// ---- Adoptar ---------------------------------------------------------------------------
+async function ponerTituloYDescripcion(vivo, prog) {
+  const titulo = prog.snippet.title.slice(0, TOPE_TITULO);
+  const descripcion = prog.snippet.description || '';
+  try {
+    const v = await llamar(API + '/videos?part=snippet&id=' + encodeURIComponent(vivo.id));
+    const s = v.items?.[0]?.snippet;
+    if (!s) throw new Error('El video todavía no existe');
+    // Se reenvian categoria, etiquetas e idiomas: lo que no se manda, YouTube lo borra.
+    const snippet = { title: titulo, description: descripcion, categoryId: s.categoryId };
+    for (const k of ['tags', 'defaultLanguage', 'defaultAudioLanguage']) if (s[k]) snippet[k] = s[k];
+    await llamar(API + '/videos?part=snippet', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: vivo.id, snippet }),
+    });
+  } catch (e) {
+    // Plan B: por la transmision en vez de por el video.
+    await llamar(API + '/liveBroadcasts?part=snippet', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: vivo.id, snippet: {
+        title: titulo, description: descripcion, scheduledStartTime: vivo.snippet.scheduledStartTime } }),
+    });
+  }
+}
+
+async function copiarMiniatura(vivo, prog) {
+  const t = prog.snippet.thumbnails || {};
+  const url = (t.maxres || t.standard || t.high || t.medium || t.default || {}).url;
+  if (!url) return 'La programada no tiene miniatura.';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob();
+    await llamar('https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=' +
+      encodeURIComponent(vivo.id), { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
+    return '';
+  } catch (e) {
+    return 'No se pudo copiar la miniatura (' + e.message + '). Se puede cambiar a mano en YouTube Studio.';
+  }
+}
+
+$('btnAdoptar').onclick = async () => {
+  const prog = programadas.find((b) => b.id === elegido('prog'));
+  const vivo = vivos.find((b) => b.id === elegido('vivo'));
+  if (!prog || !vivo) return;
+  $('btnAdoptar').disabled = true;
+  $('resultado').innerHTML = '<div class="aviso">Trabajando…</div>';
+  const notas = [];
+  try {
+    await ponerTituloYDescripcion(vivo, prog);
+    const fallaMini = await copiarMiniatura(vivo, prog);
+    if (fallaMini) notas.push(fallaMini);
+
+    let borrada = false;
+    const nuncaSalio = !prog.snippet.actualStartTime && ['created', 'ready'].includes(prog.status.lifeCycleStatus);
+    if ($('borrar').checked) {
+      if (!nuncaSalio) notas.push('La programada ya había salido al aire: no se borra.');
+      else {
+        try { await llamar(API + '/liveBroadcasts?id=' + encodeURIComponent(prog.id), { method: 'DELETE' }); borrada = true; }
+        catch (e) { notas.push('No se pudo borrar la programada (' + e.message + '). Borrala desde YouTube Studio.'); }
+      }
+    }
+    if (prog.status.privacyStatus !== vivo.status.privacyStatus) {
+      notas.push('Ojo: la programada era "' + prog.status.privacyStatus + '" y la transmisión está "' +
+        vivo.status.privacyStatus + '". La visibilidad no se cambió.');
+    }
+    const link = 'https://youtube.com/live/' + vivo.id;
+    const textoCompartir = prog.snippet.title + '\n' + link;
+    $('resultado').innerHTML =
+      '<div class="aviso ok"><strong>Listo.</strong> La transmisión ahora se llama:<br><b>' + escapar(prog.snippet.title) + '</b>' +
+      '<p>Link para mandar:</p><p class="link">' + escapar(link) + '</p>' +
+      (borrada ? '<p>La programada vacía se borró: <strong>su link ya no anda</strong>. Mandá este.</p>'
+               : '<p>La programada vacía sigue existiendo: su link no sale en vivo. Mandá este.</p>') + '</div>' +
+      notas.map((n) => '<div class="aviso error">' + escapar(n) + '</div>').join('') +
+      '<div class="fila"><button id="btnCopiar">COPIAR LINK</button><button id="btnCompartir" class="verde">COMPARTIR</button></div>';
+    $('btnCopiar').onclick = async () => {
+      try { await navigator.clipboard.writeText(link); avisar('Link copiado.', 'ok'); }
+      catch { avisar('No se pudo copiar. Mantené apretado el link y copialo.', 'error'); }
+    };
+    $('btnCompartir').onclick = () => {
+      if (navigator.share) navigator.share({ text: textoCompartir }).catch(() => {});
+      else window.open('https://wa.me/?text=' + encodeURIComponent(textoCompartir), '_blank');
+    };
+    cargar(false);
+  } catch (e) {
+    $('resultado').innerHTML = '';
+    avisar('No se pudo adoptar: ' + e.message, 'error');
+    revisarBoton();
+  }
+};
+</script>
+</body>
+</html>
