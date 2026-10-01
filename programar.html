@@ -580,15 +580,20 @@ function texto(ctx, t, tam, cx, y, desdeAbajo, color = '#fff') {
   } while (true);
   ctx.save();
   ctx.fillStyle = color;
-  // Sombra solo para el texto blanco (sobre la foto); el negro va sobre blanco.
-  if (color === '#fff') {
-    ctx.shadowColor = '#000';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 3;
-  }
   ctx.textAlign = 'center';
   ctx.textBaseline = desdeAbajo ? 'bottom' : 'top';
-  ctx.fillText(t, cx, y);
+  // Sombra solo para el texto blanco (sobre la foto); el negro va sobre blanco. Son tres
+  // capas: como el fondo ya no tiene franjas oscuras, el texto se lee por su contorno.
+  if (color === '#fff') {
+    ctx.shadowColor = '#000';
+    for (const [difuso, bajada] of [[18, 0], [8, 3], [3, 0]]) {
+      ctx.shadowBlur = difuso;
+      ctx.shadowOffsetY = bajada;
+      ctx.fillText(t, cx, y);
+    }
+  } else {
+    ctx.fillText(t, cx, y);
+  }
   ctx.restore();
 }
 
@@ -609,15 +614,10 @@ async function armarMiniatura(p) {
   const ctx = c.getContext('2d');
   if (fondo) {
     cubrir(ctx, fondo, 1280, 720);
-    // La foto se oscurece entera: que se lean los textos y resalten los escudos.
+    // La foto se oscurece pareja (sin franjas arriba y abajo, que tapaban a las jugadoras):
+    // los textos se leen por su sombra, no por el fondo.
     ctx.fillStyle = 'rgba(0,0,0,.4)';
     ctx.fillRect(0, 0, 1280, 720);
-    let g = ctx.createLinearGradient(0, 0, 0, 210);
-    g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 210);
-    g = ctx.createLinearGradient(0, 490, 0, 720);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.9)');
-    ctx.fillStyle = g; ctx.fillRect(0, 490, 1280, 230);
   } else {
     // Sin foto: colores de All Boys. Marco negro grueso (textos en blanco) y rectangulo
     // blanco en el medio (escudos y VS en negro). Igual que en la app.
