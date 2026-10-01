@@ -41,6 +41,8 @@
   .mini .vacia { width: 160px; aspect-ratio: 16 / 9; border-radius: 6px; border: 1px dashed #30363D;
                  display: grid; place-items: center; color: #8B949E; font-size: 12px; text-align: center; }
   .acciones { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+  .generica { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #12233D; border: 1px solid #1F4E8C; }
+  .generica small { display: block; color: #8B949E; font-size: 12px; margin-top: 4px; }
   .aviso { background: #161B22; border-left: 4px solid #FFC107; padding: 10px 14px; margin: 14px 0;
            border-radius: 4px; font-size: 14px; }
   .error { background: #2D1618; border-left-color: #F85149; }
@@ -161,6 +163,15 @@
     </details>
 
     <h2>Partidos</h2>
+    <p style="color:#8B949E;font-size:13px;margin:0 0 10px">
+      En cada partido elegís <strong>qué programada usar</strong>: una <strong>genérica</strong> hecha con la
+      app de YouTube del celular (se le cargan el título, la hora, la visibilidad y la miniatura, y su link
+      no cambia) o <strong>una nueva para MarcaVivo</strong>.
+      Para tener genéricas: en la app de YouTube, programá una transmisión con el título <em>Genérica 1</em>
+      (y así con las que hagan falta).
+      <button class="suave chico" id="btnGenericas">↻ ACTUALIZAR GENÉRICAS</button>
+      <span id="infoGenericas"></span>
+    </p>
     <div id="partidos"></div>
     <p class="acciones">
       <button class="suave" id="btnAgregar">+ AGREGAR PARTIDO</button>
@@ -279,6 +290,7 @@ $('btnEntrar').onclick = () => {
       $('entrada').hidden = true;
       $('formulario').hidden = false;
       avisar('');
+      cargarGenericas();
     },
   }).requestAccessToken();
 };
@@ -338,6 +350,8 @@ function agregarPartido(desde) {
       '<div class="equipo"><label>Visitante</label><select data-equipo="rival"></select>' +
         '<input data-otro="rival" placeholder="Nombre del club" hidden style="margin-top:6px"></div>' +
     '</div>' +
+    '<div class="generica"><label>Programada a usar</label>' +
+      '<select data-generica></select><small data-notageneri></small></div>' +
     '<div class="titulo">' +
       '<div class="fila"><small data-cuenta></small>' +
         '<button class="suave chico" data-automatico hidden>↺ VOLVER AL AUTOMÁTICO</button></div>' +
@@ -355,6 +369,8 @@ function agregarPartido(desde) {
   llenarCategorias(div, '');
   div.querySelector('[data-campo="rama"]').value = desde?.rama || leer('rama', 'Femenino');
   div.querySelector('[data-rueda]').onclick = abrirCategorias;
+  llenarGenericas(div, true);
+  div.querySelector('[data-generica]').onchange = () => avisarGenericas();
   // Titulo: se arma solo; si se escribe a mano, queda asi (hasta volver al automatico).
   const edit = div.querySelector('[data-tituloedit]');
   edit.oninput = () => { div._tituloManual = true; actualizarTitulos(); };
@@ -1015,8 +1031,89 @@ async function sumarClubes() {
   }
 }
 
+// ---- Genericas (programadas "Movil" hechas con la app de YouTube) -----------------------
+// Una programada Movil la crea solo la app de YouTube (la API no puede). Aca se le cargan los
+// datos del partido por encima: titulo, hora, visibilidad y miniatura. El link no cambia.
+let genericas = [];
+
+const esBorradorAutomatico = (b) => /est[aá] en vivo/i.test(b.snippet?.title || '');
+
+async function cargarGenericas() {
+  $('infoGenericas').textContent = 'Buscando genéricas…';
+  try {
+    const j = await llamar(API + '/liveBroadcasts?part=snippet,status,contentDetails&broadcastStatus=upcoming&maxResults=50');
+    const items = j.items || [];
+    const ids = [...new Set(items.map((b) => b.contentDetails?.boundStreamId).filter(Boolean))];
+    const claves = {};
+    for (let i = 0; i < ids.length; i += 50) {
+      const r = await llamar(API + '/liveStreams?part=id,snippet,cdn&maxResults=50&id=' + ids.slice(i, i + 50).join(','));
+      for (const c of r.items || []) claves[c.id] = c;
+    }
+    genericas = items.filter((b) => {
+      const c = claves[b.contentDetails?.boundStreamId];
+      if (!c || esBorradorAutomatico(b)) return false;
+      if (/default stream key|predeterminada/i.test(c.snippet?.title || '')) return false;
+      // Movil: la clave es WebRTC o no tiene direccion de entrada para programas de transmision.
+      return c.cdn?.ingestionType === 'webrtc' || !c.cdn?.ingestionInfo?.ingestionAddress;
+    }).sort((a, b) => (a.snippet.scheduledStartTime || '').localeCompare(b.snippet.scheduledStartTime || ''));
+    $('infoGenericas').textContent = genericas.length
+      ? genericas.length + (genericas.length === 1 ? ' genérica disponible' : ' genéricas disponibles')
+      : 'No hay genéricas: se crean programadas nuevas para MarcaVivo.';
+  } catch (e) {
+    genericas = [];
+    $('infoGenericas').textContent = 'No se pudieron leer las genéricas (' + e.message + ').';
+  }
+  for (const div of $('partidos').children) llenarGenericas(div, false);
+}
+
+function cuandoCorto(iso) {
+  return iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'sin fecha';
+}
+
+// Opciones del selector de un partido: arranca en la primera genérica que nadie esté usando.
+function llenarGenericas(div) {
+  const sel = div.querySelector('[data-generica]');
+  const antes = sel.value;
+  sel.innerHTML = '<option value="">Crear una nueva (sirve para MarcaVivo)</option>' +
+    genericas.map((g) => '<option value="' + escapar(g.id) + '">Genérica: ' + escapar(g.snippet.title) +
+      ' · ' + escapar(cuandoCorto(g.snippet.scheduledStartTime)) + '</option>').join('');
+  if (antes && genericas.some((g) => g.id === antes)) sel.value = antes;
+  else if (genericas.length) {
+    const usadas = new Set([...$('partidos').querySelectorAll('[data-generica]')].filter((x) => x !== sel).map((x) => x.value));
+    const libre = genericas.find((g) => !usadas.has(g.id));
+    sel.value = libre ? libre.id : '';
+  }
+  avisarGenericas();
+}
+
+function avisarGenericas() {
+  for (const div of $('partidos').children) {
+    const v = div.querySelector('[data-generica]').value;
+    div.querySelector('[data-notageneri]').textContent = v
+      ? 'Se completa esa genérica con los datos de abajo. Se transmite con la app de YouTube del celular; para MarcaVivo se usa CONVERTIR.'
+      : 'Se crea una programada nueva, lista para MarcaVivo (la app de YouTube del celular no la puede usar).';
+  }
+}
+$('btnGenericas').onclick = cargarGenericas;
+
+// Completa una genérica: titulo, hora y visibilidad por la transmision, y la miniatura aparte.
+function completarGenerica(id, titulo, inicio, privacidad) {
+  const g = genericas.find((x) => x.id === id);
+  // Si la hora ya pasó, YouTube la rechaza: se pone para dentro de un par de minutos.
+  const cuando = inicio.getTime() < Date.now() + 60000 ? new Date(Date.now() + 120000) : inicio;
+  return llamar(API + '/liveBroadcasts?part=snippet,status', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id,
+      snippet: { title: titulo, description: g?.snippet?.description || '', scheduledStartTime: cuando.toISOString() },
+      status: { privacyStatus: privacidad, selfDeclaredMadeForKids: false },
+    }),
+  });
+}
+
 // ---- Crear -----------------------------------------------------------------------------
-async function llamar(url, opciones) {
+async function llamar(url, opciones = {}) {
   const r = await fetch(url, {
     ...opciones,
     headers: { Authorization: 'Bearer ' + token, ...(opciones.headers || {}) },
@@ -1081,6 +1178,11 @@ $('btnCrear').onclick = async () => {
     }
   }
 
+  const elegidas = partidos.map((p) => p.div.querySelector('[data-generica]').value).filter(Boolean);
+  if (new Set(elegidas).size !== elegidas.length) {
+    return avisar('Dos partidos eligieron la misma genérica: cada uno tiene que usar una distinta.', 'error');
+  }
+
   recordar('torneos', $('torneo').value);
   guardar('fecha', $('fecha').value);
   guardar('privacidad', $('privacidad').value);
@@ -1100,8 +1202,12 @@ $('btnCrear').onclick = async () => {
       avisar('Creando ' + (i + 1) + ' de ' + partidos.length + ': ' + titulo);
       const item = { titulo };
       try {
-        const b = await crearProgramada(titulo, new Date(dia + 'T' + p.hora), privacidad);
+        const gid = p.div.querySelector('[data-generica]').value;
+        const inicio = new Date(dia + 'T' + p.hora);
+        const b = gid ? await completarGenerica(gid, titulo, inicio, privacidad)
+                      : await crearProgramada(titulo, inicio, privacidad);
         item.id = b.id;
+        item.generica = !!gid;
         const mini = p.mini;
         if (mini) {
           try {
@@ -1129,10 +1235,12 @@ $('btnCrear').onclick = async () => {
     ? 'Listo: se crearon las ' + bien + ' programadas. Actualizá la lista en MarcaVivo para verlas.'
     : 'Se crearon ' + bien + ' de ' + partidos.length + '. Mirá abajo cuáles fallaron.',
     bien === partidos.length ? 'bien' : 'error');
+  if (hechas.some((x) => x.generica)) cargarGenericas();
   $('resultado').innerHTML = '<ul>' + hechas.map((x) => '<li>' +
     (x.id
       ? '<span class="ok">✓</span> <a href="https://youtube.com/live/' + encodeURIComponent(x.id) +
         '" target="_blank" rel="noopener">' + escapar(x.titulo) + '</a>' +
+        (x.generica ? ' <span class="ok">(genérica completada)</span>' : '') +
         (x.errorMini ? ' <span class="no">(sin miniatura: ' + escapar(x.errorMini) + ')</span>' : '')
       : '<span class="no">✗ ' + escapar(x.titulo) + ': ' + escapar(x.error) + '</span>') +
     '</li>').join('') + '</ul>';
