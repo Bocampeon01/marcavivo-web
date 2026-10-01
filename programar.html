@@ -1037,7 +1037,16 @@ async function sumarClubes() {
 // datos del partido por encima: titulo, hora, visibilidad y miniatura. El link no cambia.
 let genericas = [];
 
-const esBorradorAutomatico = (b) => /est[aá] en vivo/i.test(b.snippet?.title || '');
+// El borrador que crea la app de YouTube sola nace programado para el mismo instante en que se crea.
+// Si alguien le dejó ese nombre pero la programó para después, es una genérica de verdad.
+const esBorradorAutomatico = (b) => {
+  if (!/est[aá] en vivo/i.test(b.snippet?.title || '')) return false;
+  const creada = Date.parse(b.snippet?.publishedAt), programada = Date.parse(b.snippet?.scheduledStartTime);
+  if (isNaN(creada) || isNaN(programada)) return true;
+  return Math.abs(programada - creada) <= 120000;
+};
+// Una genérica a la que ya se le cargó un partido: su título dice "Handball Local vs Visitante".
+const yaCompletada = (g) => /handball\s+.+?\s+vs\.?\s+/i.test(g.snippet?.title || '');
 
 async function cargarGenericas() {
   $('infoGenericas').textContent = 'Buscando genéricas…';
@@ -1077,11 +1086,13 @@ function llenarGenericas(div) {
   const antes = sel.value;
   sel.innerHTML = '<option value="">Crear una nueva (sirve para MarcaVivo)</option>' +
     genericas.map((g) => '<option value="' + escapar(g.id) + '">Genérica: ' + escapar(g.snippet.title) +
-      ' · ' + escapar(cuandoCorto(g.snippet.scheduledStartTime)) + '</option>').join('');
+      ' · ' + escapar(cuandoCorto(g.snippet.scheduledStartTime)) + (yaCompletada(g) ? ' · ya completada' : '') +
+      '</option>').join('');
   if (antes && genericas.some((g) => g.id === antes)) sel.value = antes;
   else if (genericas.length) {
+    // Arranca en la primera que nadie esté usando y que todavía no tenga partido.
     const usadas = new Set([...$('partidos').querySelectorAll('[data-generica]')].filter((x) => x !== sel).map((x) => x.value));
-    const libre = genericas.find((g) => !usadas.has(g.id));
+    const libre = genericas.find((g) => !usadas.has(g.id) && !yaCompletada(g));
     sel.value = libre ? libre.id : '';
   }
   avisarGenericas();
