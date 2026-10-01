@@ -392,6 +392,7 @@ function agregarPartido(desde) {
   div.querySelector('[data-quitar]').onclick = () => {
     div.remove();
     actualizarTitulos();
+    rotularBoton();
   };
   actualizarTitulos();
 }
@@ -1093,8 +1094,19 @@ function avisarGenericas() {
       ? 'Se completa esa genérica con los datos de abajo. Se transmite con la app de YouTube del celular; para MarcaVivo se usa CONVERTIR.'
       : 'Se crea una programada nueva, lista para MarcaVivo (la app de YouTube del celular no la puede usar).';
   }
+  rotularBoton();
 }
 $('btnGenericas').onclick = cargarGenericas;
+
+// El boton dice lo que va a pasar: actualizar las genéricas elegidas, crear de cero, o las dos cosas.
+function rotularBoton() {
+  const usa = [...$('partidos').querySelectorAll('[data-generica]')].map((x) => !!x.value);
+  const n = usa.length, act = usa.filter(Boolean).length;
+  const plural = n === 1 ? '' : 'S';
+  $('btnCrear').textContent = act === 0 ? 'CREAR PROGRAMADA' + plural
+    : act === n ? 'ACTUALIZAR PROGRAMADA' + plural
+    : 'CREAR Y ACTUALIZAR';
+}
 
 // Completa una genérica: titulo, hora y visibilidad por la transmision, y la miniatura aparte.
 function completarGenerica(id, titulo, inicio, privacidad) {
@@ -1199,7 +1211,8 @@ $('btnCrear').onclick = async () => {
   try {
     for (const [i, p] of partidos.entries()) {
       const titulo = tituloDe(p);
-      avisar('Creando ' + (i + 1) + ' de ' + partidos.length + ': ' + titulo);
+      avisar((p.div.querySelector('[data-generica]').value ? 'Actualizando ' : 'Creando ') +
+        (i + 1) + ' de ' + partidos.length + ': ' + titulo);
       const item = { titulo };
       try {
         const gid = p.div.querySelector('[data-generica]').value;
@@ -1231,9 +1244,14 @@ $('btnCrear').onclick = async () => {
   }
 
   const bien = hechas.filter((x) => x.id).length;
+  const nuevas = hechas.filter((x) => x.id && !x.generica).length;
+  const actualizadas = bien - nuevas;
+  const resumen = [nuevas && (nuevas === 1 ? 'se creó 1 programada' : 'se crearon ' + nuevas + ' programadas'),
+    actualizadas && (actualizadas === 1 ? 'se actualizó 1 programada' : 'se actualizaron ' + actualizadas + ' programadas')]
+    .filter(Boolean).join(' y ');
   avisar(bien === partidos.length
-    ? 'Listo: se crearon las ' + bien + ' programadas. Actualizá la lista en MarcaVivo para verlas.'
-    : 'Se crearon ' + bien + ' de ' + partidos.length + '. Mirá abajo cuáles fallaron.',
+    ? 'Listo: ' + resumen + '.' + (nuevas ? ' Actualizá la lista en MarcaVivo para verlas.' : '')
+    : 'Se hicieron ' + bien + ' de ' + partidos.length + '. Mirá abajo cuáles fallaron.',
     bien === partidos.length ? 'bien' : 'error');
   if (hechas.some((x) => x.generica)) cargarGenericas();
   $('resultado').innerHTML = '<ul>' + hechas.map((x) => '<li>' +
