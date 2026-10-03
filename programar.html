@@ -244,7 +244,8 @@ const DEPORTE = 'Handball'; // va fijo en el titulo, antes de los clubes
 const TOPE_TITULO = 100; // YouTube no acepta titulos mas largos
 
 // Todas las categorias posibles, por grupo. En la lista de cada partido aparecen solo las
-// tildadas en la rueda de configuracion (se guarda en esta compu).
+// tildadas en la rueda de configuracion. La seleccion se guarda en la biblioteca compartida
+// (Firebase), asi es la misma en todas las compus y en la app; en esta compu queda una copia.
 const GRUPOS_CATEGORIAS = [
   ['Mini', ['A', 'B', 'C', 'D', 'E', 'F']],
   ['Infantiles', ['A', 'B', 'C', 'D', 'E', 'F']],
@@ -456,6 +457,8 @@ $('btnCatListo').onclick = () => {
   const elegidas = casillasCat().filter((c) => c.checked).map((c) => c.value);
   if (!elegidas.length) return alert('Tildá al menos una categoría.');
   guardar('categorias_elegidas', elegidas);
+  subirCategorias(elegidas).catch((e) =>
+    alert('La lista quedó guardada en esta compu, pero no se pudo compartir con la app: ' + e.message));
   $('dlgCategorias').close();
   for (const div of $('partidos').children) llenarCategorias(div);
   pintarBiblioteca();
@@ -574,6 +577,35 @@ async function indiceBiblioteca(tipo) {
   await entrada;
   const snap = await firebase.database().ref('biblioteca/indice/' + tipo).get();
   return Object.values(snap.val() || {});
+}
+
+// ---- Categorias elegidas, compartidas: biblioteca/indice/categorias/<clave> = nombre -----
+function subirCategorias(elegidas) {
+  const datos = {};
+  for (const c of elegidas) datos[clave(c)] = c;
+  return entrada.then(() => firebase.database().ref('biblioteca/indice/categorias').set(datos));
+}
+
+// Al abrir: si ya hay una seleccion compartida, manda esa. Si no, se sube la de esta compu.
+async function sincronizarCategorias() {
+  try {
+    await entrada;
+    const snap = await firebase.database().ref('biblioteca/indice/categorias').get();
+    const compartidas = Object.values(snap.val() || {}).filter((c) => CATEGORIAS.includes(c));
+    if (compartidas.length) {
+      const antes = JSON.stringify(categoriasElegidas());
+      guardar('categorias_elegidas', compartidas);
+      if (JSON.stringify(categoriasElegidas()) !== antes) {
+        for (const div of $('partidos').children) llenarCategorias(div);
+        pintarBiblioteca();
+        actualizarTitulos();
+      }
+    } else if (Array.isArray(leer('categorias_elegidas', null))) {
+      await subirCategorias(categoriasElegidas());
+    }
+  } catch (e) {
+    console.warn('No se pudieron sincronizar las categorias:', e);
+  }
 }
 
 // Devuelve la imagen ya cargada (HTMLImageElement) o null si no esta.
@@ -1410,7 +1442,7 @@ $('btnCrear').onclick = async () => {
   agregarPartido();
   sumarClubes();
   // Con la lista de escudos ya leida, se eligen solos los de cada partido.
-  pintarBiblioteca().then(rearmarMiniaturas);
+  pintarBiblioteca().then(rearmarMiniaturas).then(sincronizarCategorias);
 })();
 </script>
 </body>
