@@ -83,6 +83,18 @@
   dialog#dlgCategorias { background: #161B22; color: #E6EDF3; border: 1px solid #30363D;
                          border-radius: 10px; max-width: 760px; width: calc(100% - 32px); padding: 18px; }
   dialog#dlgCategorias::backdrop { background: rgba(0,0,0,.7); }
+  dialog#dlgBorrar { background: #161B22; color: #E6EDF3; border: 1px solid #30363D; border-radius: 12px;
+                     padding: 18px; max-width: 420px; width: calc(100% - 32px); }
+  dialog#dlgBorrar::backdrop { background: rgba(0,0,0,.7); }
+  /* Programadas del canal: se borran manteniendolas apretadas 4 segundos (sin botones de mas). */
+  .prog { position: relative; overflow: hidden; background: #0D1117; border: 1px solid #30363D; border-radius: 8px;
+          padding: 10px 12px; margin-bottom: 8px; user-select: none; -webkit-user-select: none;
+          -webkit-touch-callout: none; touch-action: pan-y; cursor: pointer; }
+  .prog b { display: block; word-break: break-word; }
+  .prog small { color: #8B949E; }
+  .prog .barra { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: #F85149; }
+  .prog.apretando .barra { width: 100%; transition: width 4s linear; }
+  .prog.etiqueta small.tipo { color: #FFC107; }
   .grupoCat { margin: 10px 0; }
   .grupoCat .opciones { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 4px; }
   .grupoCat label { display: flex; align-items: center; gap: 6px; color: #E6EDF3; font-size: 14px;
@@ -181,8 +193,24 @@
       <button id="btnCrear">CREAR PROGRAMADAS</button>
     </p>
     <div id="resultado"></div>
+
+    <h2>Programadas del canal</h2>
+    <details class="bib" id="bibProgramadas">
+      <summary>Programadas del canal <span id="cuentaProgramadas" style="color:#8B949E;font-weight:400"></span></summary>
+      <p style="color:#8B949E;font-size:13px">Para <strong>borrar</strong> una que sobra o se hizo por error:
+        <strong>mantenela apretada 4 segundos</strong> (la barra roja se va llenando). Sale un menú con BORRAR y,
+        después, la pregunta de si estás seguro. Solo se pueden borrar las que nunca salieron al aire.</p>
+      <p class="acciones"><button class="suave chico" id="btnProgramadas">↻ ACTUALIZAR</button></p>
+      <div id="listaProgramadas"></div>
+    </details>
   </div>
 </main>
+
+<dialog id="dlgBorrar">
+  <h3 id="dbTitulo" style="margin-top:0"></h3>
+  <div id="dbTexto" style="color:#C9D1D9;font-size:14px"></div>
+  <p class="acciones" id="dbBotones" style="justify-content:flex-end"></p>
+</dialog>
 
 <datalist id="listaCategorias"></datalist>
 
@@ -291,6 +319,7 @@ $('btnEntrar').onclick = () => {
       $('formulario').hidden = false;
       avisar('');
       cargarGenericas();
+      cargarProgramadas();
     },
   }).requestAccessToken();
 };
@@ -1135,6 +1164,99 @@ function completarGenerica(id, titulo, inicio, privacidad) {
   });
 }
 
+// ---- Programadas del canal: borrar manteniendo apretado 4 segundos ----------------------------
+let programadasCanal = [];
+
+// Cuadro de pregunta: devuelve el valor del boton que se toque.
+function preguntar(titulo, cuerpoHtml, botones) {
+  return new Promise((ok) => {
+    const d = $('dlgBorrar');
+    $('dbTitulo').textContent = titulo;
+    $('dbTexto').innerHTML = cuerpoHtml;
+    $('dbBotones').innerHTML = '';
+    for (const b of botones) {
+      const x = document.createElement('button');
+      x.textContent = b.texto;
+      x.className = b.clase || 'suave';
+      x.onclick = () => { d.close(); ok(b.valor); };
+      $('dbBotones').appendChild(x);
+    }
+    d.oncancel = () => ok(false);
+    d.showModal();
+  });
+}
+
+// Una programada que nunca salió al aire se puede borrar sin perder ningún video.
+const sePuedeBorrar = (b) => !b.snippet?.actualStartTime && ['created', 'ready'].includes(b.status?.lifeCycleStatus);
+
+async function menuDeProgramada(b) {
+  const titulo = '<b>' + escapar(b.snippet.title) + '</b><br>';
+  const borrable = sePuedeBorrar(b);
+  const quiere = await preguntar('Programada',
+    titulo + (borrable ? 'Nunca salió al aire: se puede borrar sin perder ningún video.'
+      : '<span style="color:#FFA657">Ya salió al aire (o está en vivo): borrarla borraría el video. Eso se hace a mano desde YouTube Studio.</span>'),
+    borrable ? [{ texto: 'CONTINUAR (SIN CAMBIOS)', valor: false }, { texto: 'BORRAR', valor: true, clase: 'peligro' }]
+      : [{ texto: 'CERRAR', valor: false }]);
+  if (!quiere) return;
+  const seguro = await preguntar('¿Seguro que querés borrarla?',
+    titulo + '<span style="color:#8B949E">Se borra de YouTube y su link deja de andar. No se puede deshacer.</span>',
+    [{ texto: 'NO, DEJARLA', valor: false }, { texto: 'SÍ, BORRAR', valor: true, clase: 'peligro' }]);
+  if (!seguro) return;
+  try {
+    await llamar(API + '/liveBroadcasts?id=' + encodeURIComponent(b.id), { method: 'DELETE' });
+    avisar('Programada borrada.', 'bien');
+    await cargarProgramadas();
+    cargarGenericas();
+  } catch (e) {
+    avisar('No se pudo borrar: ' + e.message, 'error');
+  }
+}
+
+// Mantener apretado: la barra roja se llena en 4 segundos; soltar antes o mover el dedo (desplazar la
+// lista) cancela y no pasa nada.
+function mantenerApretado(el, alCumplir, ms = 4000) {
+  let t = null, x0 = 0, y0 = 0;
+  const cancelar = () => { clearTimeout(t); t = null; el.classList.remove('apretando'); };
+  el.addEventListener('pointerdown', (e) => {
+    if (t) return;
+    x0 = e.clientX; y0 = e.clientY;
+    el.classList.add('apretando');
+    t = setTimeout(() => { cancelar(); if (navigator.vibrate) navigator.vibrate(80); alCumplir(); }, ms);
+  });
+  el.addEventListener('pointermove', (e) => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 18) cancelar(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, cancelar);
+  el.addEventListener('contextmenu', (e) => e.preventDefault()); // el menú del celular al mantener apretado
+}
+
+function pintarProgramadas() {
+  const div = $('listaProgramadas');
+  $('cuentaProgramadas').textContent = '(' + programadasCanal.length + ')';
+  if (!programadasCanal.length) { div.innerHTML = '<p style="color:#8B949E">No hay programadas.</p>'; return; }
+  div.innerHTML = '';
+  for (const b of programadasCanal) {
+    const x = document.createElement('div');
+    x.className = 'prog';
+    const tipo = genericas.some((g) => g.id === b.id) ? 'genérica (app de YouTube)' : 'para MarcaVivo';
+    x.innerHTML = '<b>' + escapar(b.snippet.title) + '</b><small>' + escapar(cuandoCorto(b.snippet.scheduledStartTime)) +
+      ' · ' + escapar(b.status.privacyStatus) + ' · </small><small class="tipo">' + tipo + '</small><div class="barra"></div>';
+    mantenerApretado(x, () => menuDeProgramada(b));
+    div.appendChild(x);
+  }
+}
+
+async function cargarProgramadas() {
+  $('cuentaProgramadas').textContent = '(buscando…)';
+  try {
+    const j = await llamar(API + '/liveBroadcasts?part=snippet,status,contentDetails&broadcastStatus=upcoming&maxResults=50');
+    programadasCanal = (j.items || []).sort((a, b) =>
+      (a.snippet.scheduledStartTime || '').localeCompare(b.snippet.scheduledStartTime || ''));
+    pintarProgramadas();
+  } catch (e) {
+    $('cuentaProgramadas').textContent = '(no se pudieron leer: ' + e.message + ')';
+  }
+}
+$('btnProgramadas').onclick = cargarProgramadas;
+
 // ---- Crear -----------------------------------------------------------------------------
 async function llamar(url, opciones = {}) {
   const r = await fetch(url, {
@@ -1265,6 +1387,7 @@ $('btnCrear').onclick = async () => {
     : 'Se hicieron ' + bien + ' de ' + partidos.length + '. Mirá abajo cuáles fallaron.',
     bien === partidos.length ? 'bien' : 'error');
   if (hechas.some((x) => x.generica)) cargarGenericas();
+  cargarProgramadas();
   $('resultado').innerHTML = '<ul>' + hechas.map((x) => '<li>' +
     (x.id
       ? '<span class="ok">✓</span> <a href="https://youtube.com/live/' + encodeURIComponent(x.id) +
