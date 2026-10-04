@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MarcaVivo</title>
+<!-- Para "Agregar a pantalla de inicio": abre sin la barra del navegador, con ícono propio. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0B0E12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MarcaVivo">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icono-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icono-192.png">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0B0E12; color: #E6EDF3; font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.nota { margin: 0 0 12px; color: #8B949E; font-size: 13px; }
+  canvas { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; display: block; }
+  .fila { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: center; }
+  button { font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363D; background: #161B22; color: #E6EDF3; }
+  button.principal { background: #1F6FEB; border-color: #1F6FEB; }
+  button.vivo { background: #238636; border-color: #238636; }
+  button.peligro { background: #B62324; border-color: #B62324; }
+  button:disabled { opacity: .4; }
+  input, select { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid #30363D; background: #0D1117; color: inherit; }
+  label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #8B949E; }
+  #cajaPin { background: #161B22; border: 1px solid #1F6FEB; padding: 10px 12px; border-radius: 8px; margin: 8px 0; }
+  #cajaPin form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; }
+  #aviso { background: #B62324; color: #fff; padding: 10px 12px; border-radius: 8px; margin: 8px 0; font-weight: 600; }
+  pre { background: #0D1117; border: 1px solid #21262D; padding: 10px; border-radius: 8px; overflow: auto; font-size: 13px; margin: 8px 0; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MarcaVivo Web — prueba de cámara</h1>
+  <p class="nota">Prueba técnica: cámara, marcador dibujado en el navegador y envío al servidor. No es la pantalla final. <span id="version"></span></p>
+
+  <div id="aviso" hidden></div>
+  <!-- El PIN se pide acá adentro y no con una ventana del navegador: Chrome y Safari a veces
+       no muestran esas ventanas (página recién abierta desde un link) y quedaba sin PIN. -->
+  <div id="cajaPin" hidden>
+    <form id="pinForm">
+      <strong>PIN para entrar:</strong>
+      <input id="pinTxt" type="text" inputmode="numeric" autocomplete="off" size="8">
+      <button class="principal">ENTRAR</button>
+      <span id="pinMsg"></span>
+    </form>
+  </div>
+  <canvas id="lienzo" width="1280" height="720"></canvas>
+  <video id="cam" muted playsinline autoplay hidden></video>
+
+  <div class="fila">
+    <button id="bCamara" class="principal">1. ACTIVAR CÁMARA</button>
+    <button id="bEnviar" disabled>2. ENVIAR AL SERVIDOR</button>
+    <button id="bVivo" class="vivo" disabled>3. SALIR EN VIVO</button>
+    <button id="bCortar" class="peligro" disabled>CORTAR</button>
+    <button id="bPantalla">PANTALLA COMPLETA Y HORIZONTAL</button>
+  </div>
+
+  <div class="fila">
+    <button id="bGolL">+1 ALL BOYS</button>
+    <button id="bGolV">+1 RIVAL</button>
+    <button id="bReloj">INICIAR RELOJ</button>
+  </div>
+
+  <div class="fila">
+    <label>Cámara
+      <select id="facing"><option value="environment">trasera</option><option value="user">frontal</option></select>
+    </label>
+    <label>Ruta <input id="ruta" size="10" value="prueba" readonly></label>
+    <label>Calidad
+      <select id="calidad"><option value="720">720p (HD)</option><option value="540">540p</option><option value="480">480p</option></select>
+    </label>
+    <label>Tope de envío
+      <select id="tope"><option value="4000">4.000 kbps</option><option value="3000">3.000 kbps</option><option value="2500">2.500 kbps</option><option value="2000">2.000 kbps</option><option value="1500">1.500 kbps</option></select>
+    </label>
+    <label><input type="checkbox" id="h264" checked> preferir H.264</label>
+    <label><input type="checkbox" id="relay"> forzar relay (prueba del camino desde afuera)</label>
+    <label><input type="checkbox" id="sindemora" checked> sin control por demora (no bajar el envío cuando la red demora)</label>
+  </div>
+
+  <pre id="estado">Sin iniciar.</pre>
+  <pre id="servidor">Servidor: sin datos.</pre>
+</main>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+let W = 1280, H = 720;
+// Sin transparencia y sin esperar al compositor: menos trabajo por cuadro en celulares de gama media.
+const lienzo = $('lienzo'), ctx = lienzo.getContext('2d', { alpha: false, desynchronized: true });
+const cam = $('cam');
+let flujo = null, pc = null, sender = null, bloqueo = null;
+let topeActual = 4000, enviandoDesde = 0, listoVivo = false, alAire = false;
+let ultimosBytes = 0, ultimaMedida = 0;
+let malasSeguidas = 0, avisoRed = '', fallosServidor = 0;
+const VERSION = '2026-10-03 h';
+$('version').textContent = 'Versión ' + VERSION + '.';
+// Para probar sin depender de las casillas: ...?relay=1&sindemora=1
+const parametros = new URLSearchParams(location.search);
+
+// ---------- Dónde está el servidor ----------
+// La página puede venir del mismo servidor (por el túnel o en esta PC) o de GitHub Pages, que es
+// la dirección fija. En ese caso el servidor está en otra dirección, que cambia cada vez que se
+// prende: él la deja escrita en servidor.json del repo de las páginas y acá se lee.
+const EN_PAGES = location.hostname.endsWith('github.io');
+let BASE = '';          // '' = el servidor es el mismo que sirve esta página
+let servidorListo = !EN_PAGES;
+async function buscarServidor() {
+  if (!EN_PAGES) return true;
+  const leer = async (url, opciones) => {
+    const r = await fetch(url, { cache: 'no-store', ...opciones });
+    if (!r.ok) throw new Error(String(r.status));
+    const u = (await r.json()).url;
+    if (!/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(u || '')) throw new Error('dirección inválida');
+    return u;
+  };
+  try {
+    // Primero la copia del repo (al instante); si GitHub no contesta, la publicada (tarda 1 o 2 minutos).
+    BASE = await leer('https://api.github.com/repos/Bocampeon01/marcavivo-web/contents/servidor.json',
+      { headers: { Accept: 'application/vnd.github.raw+json' } })
+      .catch(() => leer('../servidor.json?t=' + Date.now()));
+    servidorListo = true;
+  } catch (e) {
+    servidorListo = false;
+  }
+  return servidorListo;
+}
+
+// ---------- Ruta de este aparato ----------
+// Cada aparato transmite por su propia ruta: así el servidor atiende varios a la vez sin mezclarlos.
+function rutaDelAparato() {
+  const pedida = parametros.get('ruta');
+  if (/^[a-z0-9_-]{1,40}$/i.test(pedida || '')) return pedida;
+  let r = '';
+  try { r = localStorage.getItem('ruta') || ''; } catch (e) { /* sin almacenamiento */ }
+  if (!/^c[a-z0-9]{6}$/.test(r)) {
+    r = 'c' + Math.random().toString(36).slice(2, 8).padEnd(6, '0');
+    try { localStorage.setItem('ruta', r); } catch (e) { /* sin almacenamiento */ }
+  }
+  return r;
+}
+$('ruta').value = rutaDelAparato();
+// Para ensayar sin salir al aire: ...?destino=local (queda en el servidor).
+const DESTINO = parametros.get('destino') === 'local' ? 'local' : '';
+if (parametros.get('relay') === '1') $('relay').checked = true;
+if (parametros.get('sindemora') === '1') $('sindemora').checked = true;
+if (parametros.get('sindemora') === '0') $('sindemora').checked = false;
+if ([...$('tope').options].some((o) => o.value === parametros.get('tope'))) $('tope').value = parametros.get('tope');
+function actualizarAviso() {
+  const t = !servidorListo ? 'No se encontró el servidor: ¿está prendido? Se sigue buscando…'
+    : fallosServidor >= 3 ? 'No hay conexión con el servidor: revisá internet o que el servidor siga prendido.' : avisoRed;
+  $('aviso').hidden = !t;
+  $('aviso').textContent = t ? '⚠ ' + t : '';
+}
+const stats = { texto: '' };
+
+// ---------- Marcador de prueba (lo mismo que hará la web app: se dibuja acá y se manda ya quemado) ----------
+const partido = { local: 'ALL BOYS', visita: 'RIVAL', gl: 0, gv: 0, base: 0, desde: null };
+const segundosReloj = () => partido.base + (partido.desde ? Math.floor((Date.now() - partido.desde) / 1000) : 0);
+const mmss = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+
+// El video llena el cuadro 16:9 sin deformarse: lo que sobra se recorta. Con el celular en vertical
+// la cámara da 720x1280 y antes se estiraba; igual conviene filmar en horizontal.
+function dibujarVideo() {
+  const vw = cam.videoWidth, vh = cam.videoHeight;
+  if (!vw || !vh) { ctx.fillStyle = '#1b1f27'; ctx.fillRect(0, 0, W, H); return; }
+  const escala = Math.max(W / vw, H / vh);
+  const sw = W / escala, sh = H / escala;
+  ctx.drawImage(cam, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H);
+}
+
+// El marcador (texto, fondo redondeado) se dibuja en un lienzo chico SOLO cuando cambia (cada
+// segundo o con un gol), y en cada cuadro solo se pega. Antes se medía y dibujaba el texto 30 veces
+// por segundo, trabajo de más para el celular.
+const barra = document.createElement('canvas');
+const marca = document.createElement('canvas');
+let claveBarra = '', claveMarca = '';
+let dibujos = 0, dibujoFps = 0;
+setInterval(() => { dibujoFps = dibujos; dibujos = 0; }, 1000);
+
+function recuadro(c, x, y, w, h, r) {
+  c.beginPath();
+  if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h);
+  c.fill();
+}
+
+function prepararMarcador() {
+  const k = W / 1280;
+  const texto = `${partido.local}  ${partido.gl} - ${partido.gv}  ${partido.visita}   1T ${mmss(segundosReloj())}`;
+  if (texto + '|' + W !== claveBarra) {
+    claveBarra = texto + '|' + W;
+    const c = barra.getContext('2d');
+    c.font = `bold ${36 * k}px system-ui, sans-serif`;
+    const ancho = Math.ceil(c.measureText(texto).width + 40 * k);
+    barra.width = ancho; barra.height = Math.ceil(72 * k); // cambiar el tamaño reinicia el estilo
+    c.font = `bold ${36 * k}px system-ui, sans-serif`;
+    c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(0,0,0,.78)';
+    recuadro(c, 0, 0, barra.width, barra.height, 10 * k);
+    c.fillStyle = '#fff';
+    c.fillText(texto, 20 * k, barra.height / 2 + k);
+  }
+  if ('m' + W !== claveMarca) {
+    claveMarca = 'm' + W;
+    marca.width = Math.ceil(170 * k); marca.height = Math.ceil(34 * k);
+    const c = marca.getContext('2d');
+    c.font = `${22 * k}px system-ui, sans-serif`;
+    c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(255,255,255,.75)';
+    c.fillText('MarcaVivo', 4 * k, marca.height / 2);
+  }
+}
+
+function dibujar() {
+  if (cam.readyState >= 2) dibujarVideo();
+  else { ctx.fillStyle = '#1b1f27'; ctx.fillRect(0, 0, W, H); }
+  prepararMarcador();
+  const k = W / 1280;
+  ctx.drawImage(barra, 30 * k, 30 * k);
+  ctx.drawImage(marca, 30 * k, H - 30 * k - marca.height / 2);
+  dibujos++;
+}
+
+// Calidad: el cuadro que se manda. 720p es HD; 540p y 480p piden menos al celular y a la red.
+function aplicarCalidad() {
+  const alto = Number($('calidad').value) || 720;
+  const ancho = Math.round((alto * 16) / 9 / 2) * 2;
+  if (lienzo.width !== ancho || lienzo.height !== alto) { lienzo.width = ancho; lienzo.height = alto; }
+  W = ancho; H = alto; claveBarra = ''; claveMarca = '';
+  dibujar();
+}
+$('calidad').onchange = aplicarCalidad;
+
+// Pantalla completa y bloqueada en horizontal (en iPhone Safari no se puede bloquear).
+$('bPantalla').onclick = async () => {
+  try { await document.documentElement.requestFullscreen(); } catch (e) { /* no se pudo */ }
+  try { await screen.orientation.lock('landscape'); mostrar('pantalla', 'Pantalla: completa y horizontal'); }
+  catch (e) { mostrar('pantalla', 'Pantalla: no se pudo bloquear en horizontal (' + e.message + ')'); }
+};
+function bucle() {
+  dibujar();
+  if (cam.requestVideoFrameCallback) cam.requestVideoFrameCallback(bucle);
+  else requestAnimationFrame(bucle);
+}
+// Sin cámara el lienzo igual se redibuja.
+setInterval(() => { if (!flujo) dibujar(); }, 200);
+dibujar();
+
+$('bGolL').onclick = () => { partido.gl++; };
+$('bGolV').onclick = () => { partido.gv++; };
+$('bReloj').onclick = () => {
+  if (partido.desde) { partido.base = segundosReloj(); partido.desde = null; $('bReloj').textContent = 'INICIAR RELOJ'; }
+  else { partido.desde = Date.now(); $('bReloj').textContent = 'PAUSAR RELOJ'; }
+};
+
+// ---------- Llamadas al servidor (con PIN si hace falta) ----------
+// Por el túnel el servidor pide un PIN; desde esta misma PC no. Se pregunta una vez y se recuerda
+// mientras la pestaña esté abierta.
+function pinGuardado() { try { return sessionStorage.getItem('pin') || ''; } catch (e) { return ''; } }
+let pinEnMemoria = ''; // por si el navegador no deja usar sessionStorage
+let esperandoPin = []; // quienes esperan a que se escriba el PIN
+function mostrarCajaPin(mensaje) {
+  $('pinMsg').textContent = mensaje || '';
+  $('cajaPin').hidden = false;
+}
+function pedirPin(mensaje) {
+  mostrarCajaPin(mensaje);
+  return new Promise((ok) => esperandoPin.push(ok));
+}
+$('pinForm').onsubmit = (e) => {
+  e.preventDefault();
+  const pin = $('pinTxt').value.trim();
+  if (!pin) return;
+  pinEnMemoria = pin;
+  try { sessionStorage.setItem('pin', pin); } catch (err) { /* sin almacenamiento */ }
+  $('pinTxt').value = '';
+  $('cajaPin').hidden = true;
+  const lista = esperandoPin; esperandoPin = [];
+  lista.forEach((ok) => ok(pin));
+};
+async function conPin(url, opciones = {}, preguntar = true) {
+  let r;
+  for (let intento = 0; intento < 4; intento++) {
+    if (!servidorListo && !(await buscarServidor())) throw new Error('no se encontró el servidor');
+    r = await fetch(BASE + url, { ...opciones, headers: { ...(opciones.headers || {}), 'X-Pin': pinGuardado() || pinEnMemoria } });
+    if (r.status !== 401 || !preguntar) return r;
+    let motivo = '';
+    try { motivo = (await r.clone().json()).error || ''; } catch (e) { /* no era JSON */ }
+    await pedirPin(motivo === 'Falta el PIN.' ? '' : motivo);
+  }
+  return r;
+}
+
+// ---------- Estado en pantalla ----------
+const lineas = {};
+function mostrar(clave, texto) {
+  lineas[clave] = texto;
+  $('estado').textContent = Object.values(lineas).filter(Boolean).join('\n');
+}
+
+// ---------- Pantalla encendida ----------
+// El navegador suelta el pedido de "pantalla encendida" cada vez que la página deja de estar al
+// frente (otra app, notificaciones, una captura compartida). Hay que pedirlo de nuevo al volver;
+// si no, el celular se apaga solo en plena transmisión.
+let recuperada = 0, vecesOculta = 0;
+async function mantenerPantalla() {
+  if (!('wakeLock' in navigator)) { mostrar('wake', 'Pantalla encendida: NO (este navegador no lo permite)'); return; }
+  try {
+    const b = await navigator.wakeLock.request('screen');
+    bloqueo = b;
+    mostrar('wake', 'Pantalla encendida: sí' + (recuperada ? ` (recuperada ${recuperada} veces)` : ''));
+    b.addEventListener('release', () => {
+      if (bloqueo === b) bloqueo = null;
+      mostrar('wake', 'Pantalla encendida: NO (el navegador la soltó)');
+    });
+  } catch (e) {
+    mostrar('wake', 'Pantalla encendida: NO (' + e.message + ')');
+  }
+}
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible') { vecesOculta++; return; }
+  if (flujo && !bloqueo) { recuperada++; await mantenerPantalla(); }
+});
+
+// ---------- 1. Cámara ----------
+$('bCamara').onclick = async () => {
+  try {
+    if (flujo) flujo.getTracks().forEach((t) => t.stop());
+    flujo = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: { ideal: $('facing').value } },
+      audio: { echoCancellation: true, noiseSuppression: true },
+    });
+    cam.srcObject = flujo;
+    await cam.play();
+    bucle();
+    const v = flujo.getVideoTracks()[0].getSettings();
+    mostrar('camara', `Cámara: ${v.width}x${v.height} a ${Math.round(v.frameRate || 0)} fps` +
+      (flujo.getAudioTracks().length ? ' + micrófono' : ' (sin micrófono)'));
+    $('bEnviar').disabled = false;
+    await mantenerPantalla();
+  } catch (e) {
+    mostrar('camara', 'No se pudo abrir la cámara: ' + e.message);
+  }
+};
+
+// ---------- 2. Enviar al servidor (WHIP) ----------
+function esperarICE(conexion, maximoMs) {
+  return new Promise((ok) => {
+    if (conexion.iceGatheringState === 'complete') return ok();
+    const fin = () => { conexion.removeEventListener('icegatheringstatechange', cambio); ok(); };
+    const cambio = () => { if (conexion.iceGatheringState === 'complete') fin(); };
+    conexion.addEventListener('icegatheringstatechange', cambio);
+    setTimeout(fin, maximoMs);
+  });
+}
+
+$('bEnviar').onclick = async () => {
+  try {
+    $('bEnviar').disabled = true;
+    aplicarCalidad();
+    $('calidad').disabled = true; // el tamaño del cuadro no se cambia en plena transmisión
+    // Estas casillas se leen una sola vez, acá: se bloquean para que se vea qué quedó aplicado.
+    const forzarRelay = $('relay').checked, sinDemora = $('sindemora').checked;
+    const topeKbps = Number($('tope').value) || 4000;
+    topeActual = topeKbps;
+    $('relay').disabled = $('sindemora').disabled = $('h264').disabled = $('tope').disabled = true;
+    const salida = lienzo.captureStream(30);
+    // Es movimiento (deporte): ante una red floja conviene bajar el tamaño antes que los cuadros.
+    salida.getVideoTracks()[0].contentHint = 'motion';
+    // Servidores de relay: con la clave de Cloudflare permiten llegar desde cualquier red.
+    const rIce = await conPin('/api/ice');
+    if (!rIce.ok) throw new Error('el servidor no dio los servidores de relay (' + rIce.status + ')');
+    const ice = await rIce.json();
+    mostrar('ice', 'Relay: ' + (ice.turn ? 'Cloudflare' : 'no (solo STUN: anda en la misma red)') +
+      ' · forzado: ' + (forzarRelay ? 'SÍ' : 'no') + (sinDemora ? ' · sin control por demora' : '') + ' · tope ' + topeKbps + ' kbps');
+    pc = new RTCPeerConnection({
+      iceServers: ice.iceServers || [],
+      iceTransportPolicy: forzarRelay ? 'relay' : 'all',
+    });
+    mostrar('webrtc', 'WebRTC: conectando…');
+    pc.onconnectionstatechange = () => mostrar('webrtc', 'WebRTC: ' + pc.connectionState);
+    const tv = pc.addTransceiver(salida.getVideoTracks()[0], {
+      direction: 'sendonly', streams: [salida],
+      sendEncodings: [{ maxBitrate: topeKbps * 1000, maxFramerate: 30 }],
+    });
+    sender = tv.sender;
+    const mic = flujo.getAudioTracks()[0];
+    if (mic) pc.addTransceiver(mic, { direction: 'sendonly', streams: [salida] });
+    if ($('h264').checked && tv.setCodecPreferences) {
+      const caps = RTCRtpSender.getCapabilities('video').codecs;
+      const h264 = caps.filter((c) => c.mimeType === 'video/H264');
+      if (h264.length) tv.setCodecPreferences([...h264, ...caps.filter((c) => c.mimeType !== 'video/H264')]);
+    }
+    await pc.setLocalDescription(await pc.createOffer());
+    await esperarICE(pc, 4000);
+    // El servidor pasa la conexión a MediaMTX: por el túnel solo hace falta una dirección.
+    const r = await conPin('/whip/' + encodeURIComponent($('ruta').value) + (sinDemora ? '?sindemora=1' : ''),
+      { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp });
+    if (!r.ok) throw new Error(`el servidor contestó ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await r.text() });
+    try {
+      const pr = sender.getParameters();
+      pr.degradationPreference = 'maintain-framerate';
+      await sender.setParameters(pr);
+    } catch (e) { /* este navegador no lo admite */ }
+    enviandoDesde = performance.now();
+    mostrar('listo', 'Subiendo la calidad: esperá antes de salir en vivo…');
+    setInterval(medir, 2000);
+    setInterval(informar, 5000);
+  } catch (e) {
+    mostrar('webrtc', 'No se pudo enviar al servidor: ' + e.message);
+    $('bEnviar').disabled = false;
+    $('relay').disabled = $('sindemora').disabled = $('h264').disabled = $('tope').disabled = false;
+  }
+};
+
+async function medir() {
+  if (!pc) return;
+  const todo = await pc.getStats();
+  let video = null, par = null, remoto = null, fuente = null;
+  todo.forEach((s) => {
+    if (s.type === 'media-source' && s.kind === 'video') fuente = s;
+    if (s.type === 'outbound-rtp' && s.kind === 'video') video = s;
+    if (s.type === 'remote-inbound-rtp' && s.kind === 'video') remoto = s;
+    if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) par = s;
+  });
+  if (!video) return;
+  // Detalle: cuánto ancho de banda cree tener el celular, qué se pierde y quién codifica.
+  const kb = (b) => (b == null ? '?' : Math.round(b / 1000) + ' kbps');
+  const dur = video.qualityLimitationDurations || {};
+  mostrar('red', 'Red: calcula ' + kb(par && par.availableOutgoingBitrate) +
+    ' · perdido ' + (remoto && remoto.fractionLost != null ? Math.round(remoto.fractionLost * 100) + '%' : '?') +
+    ' · NACK ' + (video.nackCount ?? '?') + ' · PLI ' + (video.pliCount ?? '?') +
+    ' · codifica ' + (video.encoderImplementation || '?') +
+    ' · limitado: red ' + Math.round(dur.bandwidth || 0) + ' s, cpu ' + Math.round(dur.cpu || 0) + ' s');
+  // Dónde se pierden cuadros: al dibujar, en la fuente, o al codificar.
+  mostrar('cuadros', 'Cuadros: dibujo ' + dibujoFps + ' fps · fuente ' + Math.round((fuente && fuente.framesPerSecond) || 0) +
+    ' fps · enviados ' + Math.round(video.framesPerSecond || 0) + ' fps · codificar ' +
+    (video.framesEncoded ? ((video.totalEncodeTime / video.framesEncoded) * 1000).toFixed(1) : '?') + ' ms por cuadro');
+  // Aviso de red mala (solo cuando se sostiene unos segundos, no en el arranque).
+  const rtt = par && par.currentRoundTripTime, bwe = par && par.availableOutgoingBitrate;
+  const mala = (rtt != null && rtt > 0.8) || (bwe != null && bwe < 600000 && video.qualityLimitationReason === 'bandwidth');
+  malasSeguidas = mala ? malasSeguidas + 1 : 0;
+  avisoRed = malasSeguidas >= 3
+    ? 'La red del celular está muy mala (' + (rtt != null && rtt > 0.8 ? 'la ida y vuelta es de ' + Math.round(rtt * 1000) + ' ms'
+      : 'solo calcula ' + Math.round(bwe / 1000) + ' kbps') + '): la imagen va a salir pixelada. Probá con wifi o con mejor señal.'
+    : '';
+  actualizarAviso();
+  const ahora = performance.now();
+  const kbps = ultimaMedida ? Math.round(((video.bytesSent - ultimosBytes) * 8) / (ahora - ultimaMedida)) : 0;
+  // El envío arranca bajo y sube de a poco (unos 40 s): salir antes es salir pixelado.
+  if (!listoVivo) {
+    if (kbps >= topeActual * 0.7 || ahora - enviandoDesde > 60000) {
+      listoVivo = true;
+      if (!alAire) $('bVivo').disabled = false;
+      mostrar('listo', 'LISTO para salir en vivo.');
+    } else {
+      mostrar('listo', `Subiendo la calidad: ${kbps} de ${topeActual} kbps. Esperá antes de salir en vivo…`);
+    }
+  }
+  ultimosBytes = video.bytesSent; ultimaMedida = ahora;
+  const codec = video.codecId && todo.get(video.codecId) ? todo.get(video.codecId).mimeType : '?';
+  mostrar('envio', `Envío: ${video.frameWidth}x${video.frameHeight} a ${Math.round(video.framesPerSecond || 0)} fps, ` +
+    `${kbps} kbps, ${codec}` + (video.qualityLimitationReason && video.qualityLimitationReason !== 'none' ? `, limitado por ${video.qualityLimitationReason}` : '') +
+    (par && par.currentRoundTripTime != null ? `, ida y vuelta ${Math.round(par.currentRoundTripTime * 1000)} ms` : '') +
+    (par && todo.get(par.localCandidateId) ? `, por ${todo.get(par.localCandidateId).candidateType}` : ''));
+}
+
+// El estado de esta pantalla se manda al servidor cada 5 s y queda en servidor/informes.log:
+// así se puede revisar una prueba sin depender de capturas de pantalla.
+async function informar() {
+  try {
+    await conPin('/api/informe', { method: 'POST', body: JSON.stringify({
+      version: VERSION, ruta: $('ruta').value, oculta: vecesOculta, texto: $('estado').textContent.slice(0, 2500),
+    }) }, false);
+  } catch (e) { /* sin conexión: se manda el próximo */ }
+}
+
+// ---------- 3. Salir en vivo (le pide al servidor que arranque ffmpeg) ----------
+async function api(ruta, cuerpo, preguntar = true) {
+  const r = await conPin(ruta, { method: cuerpo ? 'POST' : 'GET', body: cuerpo ? JSON.stringify(cuerpo) : undefined }, preguntar);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+$('bVivo').onclick = async () => {
+  try { await api('/api/salir', { ruta: $('ruta').value, destino: DESTINO }); alAire = true; $('bVivo').disabled = true; $('bCortar').disabled = false; }
+  catch (e) { mostrar('vivo', 'No se pudo salir en vivo: ' + e.message); }
+};
+$('bCortar').onclick = async () => {
+  try { await api('/api/cortar', { ruta: $('ruta').value }); alAire = false; $('bCortar').disabled = true; $('bVivo').disabled = !(pc && listoVivo); }
+  catch (e) { mostrar('vivo', 'No se pudo cortar: ' + e.message); }
+};
+
+async function mirarServidor() {
+  try {
+    const s = await api('/api/estado?ruta=' + encodeURIComponent($('ruta').value), undefined, false);
+    $('servidor').textContent = `Servidor: ${s.transmitiendo ? 'TRANSMITIENDO' : 'sin transmitir'} · destino ${s.destino}` +
+      (s.transmitiendo ? ` · ${s.segundos} s` : '') + (s.codigoSalida != null ? ` · ffmpeg terminó con código ${s.codigoSalida}` : '') +
+      (s.ffmpeg.length ? '\n' + s.ffmpeg.join('\n') : '');
+    fallosServidor = 0;
+    if (!esperandoPin.length) $('cajaPin').hidden = true;
+  } catch (e) {
+    // Un problema de PIN no es falta de conexión: el servidor contestó. Se pide el PIN arriba.
+    if (/PIN/.test(e.message)) {
+      $('servidor').textContent = 'Servidor: ' + e.message + ' Escribilo arriba.';
+      fallosServidor = 0;
+      if ($('cajaPin').hidden) mostrarCajaPin(e.message === 'Falta el PIN.' ? '' : e.message);
+    }
+    else {
+      $('servidor').textContent = 'Servidor: no contesta (' + e.message + ')';
+      fallosServidor++;
+      // Si se reinició, el servidor tiene otra dirección: se vuelve a buscar.
+      if (EN_PAGES && fallosServidor % 3 === 0) servidorListo = false;
+    }
+  }
+  actualizarAviso();
+}
+setInterval(mirarServidor, 2000);
+mirarServidor();
+</script>
+</body>
+</html>
