@@ -1,0 +1,80 @@
+/* Estilos comunes de la web app: los colores y las formas del tema oscuro de Material 3 que usa la
+   app de Android (botones, carteles, avisos). Cada pantalla agrega lo suyo. */
+@font-face { font-family: 'Roboto MarcaVivo'; src: url(roboto-bold.ttf); font-weight: 700; }
+:root {
+  color-scheme: dark;
+  --fondo: #0B0E12; --panel: #12161C; --texto: #E3E2E6; --suave: rgba(255,255,255,.7); --tenue: rgba(255,255,255,.38);
+  --primario: #AAC7FF; --sobre-primario: #0A305F; --tonal: #3E4759; --sobre-tonal: #DAE2F9;
+  --borde: #8E9099; --borde-suave: rgba(255,255,255,.24); --azul: #1565C0; --ambar: #FFC107;
+  --verde: #388E3C; --rojo: #D32F2F; --gris-azul: #607D8B; --cartel: #1E242C;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; background: #000; color: var(--texto);
+  font: 14px/1.25 Roboto, system-ui, -apple-system, "Segoe UI", sans-serif; overscroll-behavior: none;
+  -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+b, strong, .negrita { font-family: 'Roboto MarcaVivo', Roboto, system-ui, sans-serif; font-weight: 700; }
+button { font: inherit; color: inherit; background: none; border: 0; margin: 0; padding: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 100px;
+  font-weight: 500; letter-spacing: .1px; white-space: nowrap; text-decoration: none; }
+button:disabled { opacity: .38; cursor: default; }
+button.lleno { background: var(--primario); color: var(--sobre-primario); }
+button.tonal { background: var(--tonal); color: var(--sobre-tonal); }
+button.borde { border: 1px solid var(--borde); color: var(--primario); }
+button.texto { color: var(--primario); padding: 0 12px; height: 40px; }
+button.rojo { background: var(--rojo); color: #fff; }
+button:not(:disabled):active { filter: brightness(1.25); }
+svg.ic { width: 1.3em; height: 1.3em; fill: currentColor; flex: none; }
+.icono { width: 36px; height: 36px; flex: none; color: var(--suave); }
+.icono svg.ic { width: 22px; height: 22px; }
+
+/* Barra de arriba de las pantallas con formulario (como el AppBar de la app). */
+.barra { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 4px; background: var(--panel); flex: none;
+  padding-top: env(safe-area-inset-top); padding-left: max(4px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+.barra h1 { flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra .lleno { height: 40px; padding: 0 18px; font-weight: 700; }
+.barra .icono { width: 44px; height: 44px; color: var(--texto); }
+
+/* Pastillas para elegir una opción (ChoiceChip). */
+.chip { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--borde); color: var(--texto); font-size: 14px; }
+.chip.elegido { background: #3A4A63; border-color: #3A4A63; color: #D6E3FF; }
+.grupo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grupo > span { color: var(--suave); margin-right: 4px; }
+
+/* Campos de texto. */
+input.campo { font: inherit; color: var(--texto); background: transparent; border: 1px solid var(--borde); border-radius: 4px; padding: 9px 10px; min-width: 0;
+  -webkit-user-select: text; user-select: text; outline: none; }
+input.campo:focus { border-color: var(--primario); }
+hr { border: 0; border-top: 1px solid rgba(255,255,255,.12); margin: 12px 0; }
+
+/* Carteles (como DialogoApp): encabezado celeste, cuerpo oscuro. */
+#capa { position: fixed; inset: 0; background: rgba(0,0,0,.54); display: flex; align-items: center; justify-content: center; padding: 8px; z-index: 10; }
+#capa.arriba { align-items: flex-start; }
+.cartel { background: var(--cartel); border-radius: 12px; overflow: hidden; width: 300px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column;
+  box-shadow: 0 8px 28px rgba(0,0,0,.6); -webkit-user-select: text; user-select: text; }
+.cartel.ancho { width: 420px; }
+.cartel.banner { width: 560px; flex-direction: row; align-items: center; gap: 6px; padding: 8px; }
+.cartel header { background: var(--azul); color: #fff; padding: 9px 14px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 10px; flex: none; }
+.cartel .cuerpo { overflow: auto; padding: 14px 16px; font-size: 14px; }
+.cartel .cuerpo.lista { padding: 0; }
+.cartel .acciones { display: flex; justify-content: flex-end; gap: 4px; padding: 4px 8px 8px; flex: none; flex-wrap: wrap; }
+.cartel .acciones .lleno, .cartel .acciones .rojo { height: 40px; padding: 0 20px; }
+.opcion { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 16px; font-size: 15px; border-radius: 0; justify-content: flex-start; font-weight: 400; }
+.opcion + .opcion, .opcion.linea { border-top: 1px solid rgba(255,255,255,.12); }
+.opcion .muestra { width: 22px; height: 22px; border: 1px solid rgba(255,255,255,.54); flex: none; }
+.opcion img.muestra { background: #fff; border-radius: 3px; object-fit: contain; width: 34px; height: 26px; }
+.opcion svg.ic { color: var(--azul); width: 20px; height: 20px; }
+.opcion.rojo, .opcion.rojo svg.ic { color: #FF5252; background: none; }
+.opcion.tenue svg.ic { color: rgba(255,255,255,.54); }
+.nota { padding: 10px 16px; font-size: 14px; color: var(--suave); }
+.cartel.banner input.campo { flex: 1; }
+.cartel.banner button { width: 44px; height: 44px; flex: none; border-radius: 100px; }
+.cartel.banner .ok { background: var(--verde); color: #fff; }
+
+/* Aviso corto abajo (como el SnackBar). */
+#aviso { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: #E3E2E6; color: #1A1C1E; padding: 10px 16px; border-radius: 6px;
+  font-size: 13px; max-width: 80%; z-index: 20; box-shadow: 0 4px 14px rgba(0,0,0,.5); white-space: pre-line; }
+
+/* MarcaVivo se usa en horizontal. */
+#girar { display: none; position: fixed; inset: 0; z-index: 30; background: #000; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 18px; }
+@media (orientation: portrait) { #girar { display: flex; } }
