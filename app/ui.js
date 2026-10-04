@@ -4,6 +4,19 @@
 import { color } from './marcador.js';
 
 export const $ = (id) => document.getElementById(id);
+/**
+ * Va a otra pantalla conservando lo que venga en la dirección (por ejemplo ?destino=local en las
+ * pruebas). `cambios` pone o saca parámetros: `{ t: 'id' }` lo pone, `{ t: null }` lo saca.
+ */
+export function ir(pagina, cambios = {}) {
+  const p = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(cambios)) {
+    if (v == null) p.delete(k);
+    else p.set(k, v);
+  }
+  const consulta = p.toString();
+  location.href = pagina + (consulta ? '?' + consulta : '');
+}
 export const escapar = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Los íconos de Material que usa la app.
@@ -38,6 +51,8 @@ const TRAZOS = {
   entrar: 'M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z',
   actualizar: 'M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
   cuentas: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-6 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H8v-1.5c0-1.99 4-3 6-3s6 1.01 6 3V16z',
+  repetir: 'M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z',
+  celular: 'M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z',
   escudo: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z',
 };
 export const icono = (n) => `<svg class="ic" viewBox="0 0 24 24"><path d="${TRAZOS[n]}"/></svg>`;
@@ -95,9 +110,18 @@ export function elegir(titulo, ic, opciones, nota = '') {
 /** Pregunta de sí o no. `peligro` pinta de rojo el botón de confirmar. */
 export function confirmar(titulo, texto, si = 'SÍ', no = 'NO', { ic = 'ayuda', peligro = false } = {}) {
   return cartel({}, (div, cerrar) => {
-    div.innerHTML = cabecera(ic, titulo) + `<div class="cuerpo">${escapar(texto)}</div>` +
+    div.innerHTML = cabecera(ic, titulo) + `<div class="cuerpo" style="white-space:pre-line">${escapar(texto)}</div>` +
       `<div class="acciones"><button class="texto" data-v="0">${escapar(no)}</button><button class="${peligro ? 'rojo' : 'lleno'}" data-v="1">${escapar(si)}</button></div>`;
     div.querySelectorAll('button').forEach((b) => { b.onclick = () => cerrar(b.dataset.v === '1'); });
+  });
+}
+
+/** Cartel con un solo botón, para algo que hay que leer. `fijo`: no se cierra tocando afuera. */
+export function explicar(titulo, texto, boton = 'ENTENDIDO', { ic = 'ayuda', fijo = false } = {}) {
+  return cartel({ fijo }, (div, cerrar) => {
+    div.innerHTML = cabecera(ic, titulo) + `<div class="cuerpo" style="white-space:pre-line">${escapar(texto)}</div>` +
+      `<div class="acciones"><button class="lleno">${escapar(boton)}</button></div>`;
+    div.querySelector('.acciones button').onclick = () => cerrar(true);
   });
 }
 
