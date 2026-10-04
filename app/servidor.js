@@ -5,7 +5,7 @@
 // vez que se prende: él la deja escrita en `servidor.json` del repo de las páginas y acá se lee.
 
 /** Versión de la web app (se ve en pantalla y viaja en los informes al servidor). */
-export const VERSION = '2026-10-03 k';
+export const VERSION = '2026-10-03 l';
 
 const parametros = new URLSearchParams(location.search);
 const EN_PAGES = location.hostname.endsWith('github.io');
@@ -34,6 +34,8 @@ export const servidor = {
   /** false mientras no se sabe dónde está el servidor (solo pasa en la dirección fija). */
   listo: !EN_PAGES,
   ruta: rutaDelAparato(),
+  /** true cuando el servidor ya aceptó algún pedido de esta pantalla (el PIN que hay sirve). */
+  entro: false,
   /** Para ensayar sin salir al aire: `?destino=local` (el video queda en el servidor). */
   destino: parametros.get('destino') === 'local' ? 'local' : '',
   parametros,
@@ -79,6 +81,7 @@ export const servidor = {
         ...opciones,
         headers: { ...(opciones.headers || {}), 'X-Pin': pinGuardado() || this._pin },
       });
+      if (r.ok) this.entro = true;
       if (r.status !== 401 || !preguntar || !this.pedirPin) return r;
       let motivo = '';
       try { motivo = (await r.clone().json()).error || ''; } catch (e) { /* no era JSON */ }
@@ -106,8 +109,13 @@ export const servidor = {
   estado(preguntar = false) {
     return this.api('/api/estado?ruta=' + encodeURIComponent(this.ruta), undefined, preguntar);
   },
-  salir(destino = this.destino) {
-    return this.api('/api/salir', { ruta: this.ruta, destino });
+  /**
+   * `destino`: '' (la clave cargada en el servidor), 'local' (ensayo) o la dirección de una clave de
+   * YouTube. `marca`: nombre corto de lo que se transmite; vuelve en `estado().marca`.
+   */
+  salir(destino = this.destino, marca = '') {
+    // En un ensayo nunca se sale a YouTube, pida lo que pida la pantalla.
+    return this.api('/api/salir', { ruta: this.ruta, destino: this.destino === 'local' ? 'local' : destino, marca });
   },
   cortar() {
     return this.api('/api/cortar', { ruta: this.ruta });
