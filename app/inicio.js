@@ -1,13 +1,12 @@
 // Pantalla de inicio: sesión de Google y transmisiones programadas del canal. Es home_page.dart de
-// la app de Android, en la web. En esta etapa solo LEE de YouTube.
+// la app de Android, en la web. Acá solo se LEE de YouTube; al tocar una programada se pasa a los
+// datos del partido y de ahí a la pantalla de transmisión, que es la que sale en vivo.
 
 import { cuenta, SesionVencida } from './cuenta.js';
 import { youtube, separarTransmisiones, describirError } from './youtube.js';
 import { VERSION } from './servidor.js';
-import { $, icono, escapar, avisar } from './ui.js';
-
-// Se conserva lo que venga en la dirección (por ejemplo ?destino=local en las pruebas).
-const ir = (pagina) => { location.href = pagina + location.search; };
+import { Partido } from './partido.js';
+import { $, icono, escapar, avisar, ir } from './ui.js';
 
 let canal = cuenta.canal;
 let transmisiones = null;      // null = todavía no se cargaron
@@ -136,8 +135,23 @@ $('lista').onclick = (e) => {
   if (deCelular.has(b.id)) {
     return avisar('Esta programada es de la app de YouTube del celular: MarcaVivo no puede usarla tal cual. Convertirla desde la web app llega más adelante; por ahora se convierte desde la app de Android.', 8000);
   }
-  avisar(`Salir en vivo en "${b.titulo}" llega en la etapa siguiente. Por ahora se transmite con "Transmitir con la clave del servidor".`, 7000);
+  elegirProgramada(b);
 };
+
+/**
+ * Transmitir en `b`. Si ya está en vivo y este celular tiene su partido guardado (se cerró la página
+ * en pleno partido), va directo a la pantalla de transmisión para retomarla; si no, pasa antes por
+ * los datos del partido.
+ */
+function elegirProgramada(b) {
+  try { localStorage.setItem('programada', JSON.stringify({ id: b.id, titulo: b.titulo, enVivo: b.enVivo })); } catch (e) { /* sin almacenamiento */ }
+  let guardado = null;
+  if (b.enVivo) {
+    guardado = Partido.cargar(b.id);
+    if (guardado) guardado.cerrar();
+  }
+  ir(guardado ? 'transmitir.html' : 'partido.html', { t: b.id });
+}
 
 // ---- Botones ------------------------------------------------------------------------------------
 $('version').textContent = VERSION;
@@ -150,10 +164,12 @@ $('bCambiar').onclick = async () => {
   await cuenta.cerrar();
   await iniciarSesion({ elegir: true });
 };
-$('bManual').onclick = $('bManualEntrada').onclick = () => ir('partido.html');
-$('bPruebaEntrada').onclick = () => ir('prueba.html');
+$('bManual').onclick = $('bManualEntrada').onclick = () => ir('partido.html', { t: null });
+$('bPruebaEntrada').onclick = () => ir('prueba.html', { t: null });
 
 // ---- Arranque -----------------------------------------------------------------------------------
+// La ventana de Google tiene que poder abrirse en el mismo toque del botón: se deja lista.
+cuenta.preparar();
 if (cuenta.activa) {
   mostrar('principal');
   cargar();
