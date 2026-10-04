@@ -434,6 +434,7 @@ document.querySelectorAll('.casilla').forEach((b) => {
 
 // Equipos, colores, escudos, sponsors y partido nuevo: en la pantalla de datos del partido.
 $('bDatos').onclick = () => { location.href = 'partido.html' + location.search; };
+$('bInicio').onclick = () => { location.href = './' + location.search; };
 
 // ---- Pintar la pantalla -------------------------------------------------------------------------
 const ESTADOS = {
@@ -471,7 +472,7 @@ function pintar() {
   ponerHtml(b, icono(ic) + `<span>${etiqueta}</span>`);
   b.className = 'negrita ' + clase;
   b.disabled = estado === 'finalizando' || (estado === 'detenido' && !flujo);
-  $('bDatos').hidden = estado !== 'detenido';
+  $('bDatos').hidden = $('bInicio').hidden = estado !== 'detenido';
 
   let abajo = mensaje;
   if (estado === 'enVivo' && !reconectando) {
