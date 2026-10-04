@@ -4,8 +4,9 @@
 import { Partido, ConfigPartido } from './partido.js';
 import { Logos } from './logos.js';
 import { biblioteca, buscar, CLUB_PROPIO } from './biblioteca.js';
+import { equiposDeTitulo, nombreEnTitulo, nombreParaMarcador } from './titulo.js';
 import { color } from './marcador.js';
-import { $, icono, escapar, avisar, cartel, cabecera, elegir, confirmar, pedirNumero, elegirFotos } from './ui.js';
+import { $, icono, escapar, avisar, cartel, cabecera, elegir, confirmar, pedirNumero, elegirFotos, ir } from './ui.js';
 
 /** Colores de camiseta para el cuadradito del marcador (los mismos 18 de la app). */
 export const COLORES_CAMISETA = [
@@ -16,12 +17,17 @@ export const COLORES_CAMISETA = [
   ['Azul', 0xFF1565C0], ['Azul marino', 0xFF0D2A5C], ['Violeta', 0xFF6A1B9A],
 ];
 const MINUTOS_COMUNES = [20, 25, 30];
-const CLAVE = 'manual';
-// Se conserva lo que venga en la dirección (por ejemplo ?destino=local en las pruebas).
-const ir = (pagina) => { location.href = pagina + location.search; };
+/** Con `?t=<id>` son los datos del partido de esa programada de YouTube; sin eso, el de siempre. */
+const idProgramada = new URLSearchParams(location.search).get('t') || '';
+const CLAVE = /^[A-Za-z0-9_-]{5,40}$/.test(idProgramada) ? idProgramada : 'manual';
+const conProgramada = CLAVE !== 'manual';
 
 // ---- Estado de la pantalla: primero lo del último partido ---------------------------------------
-const ultima = ConfigPartido.ultima();
+// Si esta programada ya tiene su partido guardado (se volvió a los datos en medio del partido), se
+// parte de esos datos.
+const yaEmpezado = conProgramada ? Partido.cargar(CLAVE) : null;
+if (yaEmpezado) yaEmpezado.cerrar();
+const ultima = (yaEmpezado && yaEmpezado.config) || ConfigPartido.ultima();
 const datos = {
   local: { nombre: ultima?.local?.nombre ?? '', color1: ultima?.local?.color1 ?? 0xFFFFFFFF, color2: ultima?.local?.color2 ?? 0xFF111111 },
   visita: { nombre: ultima?.visita?.nombre ?? '', color1: ultima?.visita?.color1 ?? 0xFF1565C0, color2: ultima?.visita?.color2 ?? 0xFFD32F2F },
@@ -125,6 +131,57 @@ async function elegirEscudo(local) {
   }
 }
 
+/**
+ * Nombres sacados del título de la programada y escudos de la biblioteca del club. Solo la primera
+ * vez que se abre esa programada: después manda lo que se haya corregido a mano.
+ */
+async function cargarDeProgramada() {
+  if (!conProgramada || yaEmpezado) return;
+  let titulo = '';
+  try {
+    const p = JSON.parse(localStorage.getItem('programada') || 'null');
+    if (p && p.id === CLAVE) titulo = String(p.titulo || '');
+  } catch (e) { /* sin almacenamiento */ }
+  $('tituloProgramada').textContent = titulo;
+  $('tituloProgramada').hidden = !titulo;
+  const equipos = equiposDeTitulo(titulo);
+  if (!equipos) return;
+  // Si All Boys cambió de lado respecto del partido anterior, sus colores van con él.
+  const esPropio = (n) => nombreEnTitulo(n) === CLUB_PROPIO;
+  const antesLocal = esPropio(datos.local.nombre), ahoraLocal = esPropio(equipos.local);
+  const antesVisita = esPropio(datos.visita.nombre), ahoraVisita = esPropio(equipos.visitante);
+  if ((antesLocal && ahoraVisita) || (antesVisita && ahoraLocal)) {
+    for (const c of ['color1', 'color2']) [datos.local[c], datos.visita[c]] = [datos.visita[c], datos.local[c]];
+  }
+  datos.local.nombre = nombreParaMarcador(equipos.local);
+  datos.visita.nombre = nombreParaMarcador(equipos.visitante);
+  for (const div of document.querySelectorAll('.equipo')) {
+    div.querySelector('input').value = (div.dataset.local === '1' ? datos.local : datos.visita).nombre;
+  }
+  pintar();
+  if (!logos) return;
+  let puestos = 0;
+  try {
+    const clubes = await biblioteca.indice('clubes');
+    const delLocal = buscar(equipos.local, clubes);
+    const delVisitante = buscar(equipos.visitante, clubes.filter((n) => n !== delLocal));
+    for (const [nombre, local] of [[delLocal, true], [delVisitante, false]]) {
+      const blob = nombre ? await biblioteca.imagen('clubes', nombre) : null;
+      if (!blob) {
+        // Club sin escudo cargado: ese lado queda vacío, no con el del partido anterior.
+        await logos.quitarEscudo({ local });
+        continue;
+      }
+      await logos.ponerEscudo(blob, { local });
+      puestos++;
+    }
+  } catch (e) {
+    avisar('No se pudieron traer los escudos de la biblioteca del club: ' + (e.message || e));
+  }
+  await pintarEscudos();
+  if (puestos) avisar(puestos === 2 ? 'Equipos y escudos puestos desde la programada.' : 'Equipos puestos desde la programada. Falta un escudo en la biblioteca del club.');
+}
+
 for (const div of document.querySelectorAll('.equipo')) {
   const local = div.dataset.local === '1';
   const equipo = local ? datos.local : datos.visita;
@@ -143,7 +200,8 @@ for (const div of document.querySelectorAll('.equipo')) {
 }
 
 $('bVolver').innerHTML = icono('atras');
-$('bVolver').onclick = () => ir('transmitir.html');
+// Recién elegida la programada (todavía sin partido) se vuelve al inicio; si no, a la transmisión.
+$('bVolver').onclick = () => (conProgramada && !yaEmpezado ? ir('./', { t: null }) : ir('transmitir.html'));
 $('bContinuar').innerHTML = icono('adelante') + '<span>CONTINUAR</span>';
 $('bContinuar').onclick = async () => {
   const local = datos.local.nombre.trim(), visita = datos.visita.nombre.trim();
@@ -230,6 +288,6 @@ Logos.cargar().then(async (l) => {
   logos = l;
   pintar();
   await pintarEscudos();
-});
+}).catch(() => {}).then(cargarDeProgramada);
 // Para las pruebas automáticas.
 window.marcavivoDatos = { datos, get logos() { return logos; } };
