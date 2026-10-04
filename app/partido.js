@@ -161,6 +161,11 @@ export class Partido {
     };
   }
 
+  /** Guarda el partido tal como está (lo usa la pantalla de datos al crear uno nuevo). */
+  guardar() {
+    this._guardar();
+  }
+
   _guardar() {
     try {
       this._almacen.guardar(pref(this.clave), JSON.stringify(this.toJson()));
