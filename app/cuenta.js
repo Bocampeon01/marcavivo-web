@@ -24,8 +24,9 @@ export class SesionVencida extends Error {
 
 let sesion = null; // { token, vence, canal }
 function leer() {
-  if (sesion) return sesion;
-  try { sesion = JSON.parse(localStorage.getItem(K_SESION) || 'null'); } catch (e) { sesion = null; }
+  // Se lee cada vez de lo guardado: otra pantalla de la app pudo haber renovado la sesión. Si el
+  // navegador no deja guardar, queda la que hay en memoria.
+  try { sesion = JSON.parse(localStorage.getItem(K_SESION) || 'null') || sesion; } catch (e) { /* queda la de memoria */ }
   return sesion;
 }
 function guardar(s) {
@@ -36,10 +37,11 @@ function guardar(s) {
   } catch (e) { /* sin almacenamiento: queda en memoria */ }
 }
 
+const googleCargado = () => !!(window.google && window.google.accounts && window.google.accounts.oauth2);
 let cargandoGoogle = null;
 /** Carga la librería de Google que abre la ventana de inicio de sesión. */
 function cargarGoogle() {
-  if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
+  if (googleCargado()) return Promise.resolve();
   cargandoGoogle = cargandoGoogle || new Promise((ok, mal) => {
     const s = document.createElement('script');
     s.src = 'https://accounts.google.com/gsi/client';
@@ -92,12 +94,19 @@ export const cuenta = {
   },
 
   /**
+   * Deja cargada la librería de Google apenas abre la pantalla. Así, al tocar el botón, la ventana
+   * se abre en el mismo toque: si hubiera que esperar a que cargue, el celular la bloquea.
+   */
+  preparar() {
+    cargarGoogle().catch(() => { /* sin internet: se vuelve a intentar al tocar */ });
+  },
+
+  /**
    * Abre la ventana de Google. Tiene que llamarse desde un toque (si no, el navegador la bloquea).
    * `elegir` muestra el selector de cuentas aunque ya haya una (CAMBIAR CUENTA).
    */
-  async iniciar({ elegir = false } = {}) {
-    await cargarGoogle();
-    const r = await new Promise((ok, mal) => {
+  iniciar({ elegir = false } = {}) {
+    const pedir = () => new Promise((ok, mal) => {
       const cliente = google.accounts.oauth2.initTokenClient({
         client_id: CLIENTE,
         scope: PERMISO,
@@ -106,12 +115,25 @@ export const cuenta = {
         error_callback: (e) => mal(Object.assign(new Error((e && e.message) || 'no se abrió la ventana de Google'), { tipo: e && e.type })),
       });
       cliente.requestAccessToken();
+    }).then((r) => {
+      if (r.error) throw Object.assign(new Error(r.error_description || r.error), { tipo: r.error });
+      if (!String(r.scope || '').includes(PERMISO)) {
+        throw Object.assign(new Error('falta el permiso de YouTube'), { tipo: 'sin_permiso' });
+      }
+      guardar({ token: r.access_token, vence: Date.now() + Number(r.expires_in || 3600) * 1000, canal: elegir ? '' : this.canal });
     });
-    if (r.error) throw Object.assign(new Error(r.error_description || r.error), { tipo: r.error });
-    if (!String(r.scope || '').includes(PERMISO)) {
-      throw Object.assign(new Error('falta el permiso de YouTube'), { tipo: 'sin_permiso' });
-    }
-    guardar({ token: r.access_token, vence: Date.now() + Number(r.expires_in || 3600) * 1000, canal: elegir ? '' : this.canal });
+    // Con la librería ya cargada, la ventana se pide sin ninguna espera en el medio.
+    return googleCargado() ? pedir() : cargarGoogle().then(pedir);
+  },
+
+  /**
+   * Para antes de un paso largo (salir en vivo, finalizar): si a la sesión le quedan menos de
+   * `minutos`, abre la ventana de Google para renovarla. Tiene que llamarse desde un toque.
+   */
+  async asegurar(minutos = 5) {
+    const s = leer();
+    if (s && s.token && s.vence - Date.now() > minutos * 60_000) return;
+    await this.iniciar();
   },
 
   /** Cierra la sesión en este aparato (y le avisa a Google que la llave ya no vale). */
