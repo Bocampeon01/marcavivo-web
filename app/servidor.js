@@ -5,7 +5,7 @@
 // vez que se prende: él la deja escrita en `servidor.json` del repo de las páginas y acá se lee.
 
 /** Versión de la web app (se ve en pantalla y viaja en los informes al servidor). */
-export const VERSION = '2026-10-03 j';
+export const VERSION = '2026-10-03 k';
 
 const parametros = new URLSearchParams(location.search);
 const EN_PAGES = location.hostname.endsWith('github.io');
