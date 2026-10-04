@@ -44,7 +44,7 @@
   #bPrincipal { height: 46px; padding: 0 22px; font-size: 16px; font-weight: 700; color: #fff; background: var(--verde); flex: none; min-width: 190px; }
   #bPrincipal.rojo { background: var(--rojo); }
   #bPrincipal.gris { background: var(--gris-azul); }
-  #bDatos { font-size: 12px; height: 34px; flex: none; }
+  #bDatos, #bInicio { font-size: 12px; height: 34px; flex: none; padding: 0 8px; }
 
   /* Panel de la derecha: los controles del partido. */
   #panel { width: 300px; flex: none; background: var(--panel); padding: 10px; display: flex; flex-direction: column; overflow: hidden; }
@@ -111,6 +111,7 @@
     </div>
     <div id="filaBoton">
       <div id="mensaje"></div>
+      <button id="bInicio" class="texto" hidden>INICIO</button>
       <button id="bDatos" class="texto" hidden>DATOS DEL PARTIDO</button>
       <button id="bPrincipal" class="negrita"></button>
     </div>
