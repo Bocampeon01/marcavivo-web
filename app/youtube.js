@@ -1,8 +1,10 @@
 // Acceso a la YouTube Data API v3 con la sesión de Google. Es `lib/youtube/youtube_api.dart` de la
-// app de Android en la web. Por ahora, solo lo que LEE: canal, transmisiones programadas y claves.
-// Crear, borrar y salir en vivo llegan con las etapas siguientes.
+// app de Android en la web: canal, transmisiones programadas, claves, y lo que hace falta para salir
+// en vivo en una programada (crear y asignar la clave, cambiar el estado, capítulos del video).
+// Crear y borrar programadas llega con las etapas siguientes.
 
 import { cuenta, SesionVencida } from './cuenta.js';
+import { descripcionConCapitulos } from './capitulos.js';
 
 const BASE = 'https://www.googleapis.com/youtube/v3';
 const TIEMPO_MAXIMO_MS = 20_000;
@@ -95,6 +97,18 @@ export function claveDeJson(j) {
     /** La clave que YouTube crea sola con el canal ("Transmitir ahora"): no se borra. */
     esFija: !!snippet.isDefaultStream,
     tipo: cdn.ingestionType || '',
+    /** A dónde se manda el video: la entrada cifrada (RTMPS) si YouTube la ofrece. */
+    get url() {
+      return `${this.direccionSegura || this.direccion}/${this.nombre}`;
+    },
+    /**
+     * A dónde manda el video el servidor de la web app: la entrada común (RTMP), que es por donde
+     * viene saliendo en todas las pruebas. La cifrada hace falta en el celular (con datos móviles
+     * el puerto del RTMP común a veces no pasa), no en una PC con internet fijo.
+     */
+    get urlDesdeServidor() {
+      return `${this.direccion || this.direccionSegura}/${this.nombre}`;
+    },
   };
 }
 
@@ -109,6 +123,13 @@ function conTiempo(promesa, ms) {
     const t = setTimeout(() => mal(Object.assign(new Error('YouTube tardó demasiado en contestar'), { name: 'TimeoutError' })), ms);
     promesa.then((v) => { clearTimeout(t); ok(v); }, (e) => { clearTimeout(t); mal(e); });
   });
+}
+
+/** Para el registro: qué se pidió y qué contestó YouTube. Nunca lleva claves ni la llave de la sesión. */
+function anotar(metodo, camino, consulta, resultado) {
+  if (!youtube.alPedir) return;
+  const datos = Object.entries(consulta).filter(([k]) => k !== 'part' && k !== 'maxResults').map(([k, v]) => `${k}=${v}`).join(' ');
+  try { youtube.alPedir(`YT ${metodo} ${camino} ${datos} -> ${resultado}`); } catch (e) { /* el registro no puede romper nada */ }
 }
 
 async function enviar(metodo, camino, consulta, cuerpo) {
@@ -130,9 +151,16 @@ async function enviar(metodo, camino, consulta, cuerpo) {
       }
     }
   };
-  const r = await conReintentos(cuenta.token());
+  let r;
+  try {
+    r = await conReintentos(cuenta.token());
+  } catch (e) {
+    anotar(metodo, camino, consulta, 'falló: ' + ((e && e.message) || e));
+    throw e;
+  }
   if (r.status === 401) {
     // Llave vencida o revocada: en la web no se puede pedir otra sin un toque de quien usa la app.
+    anotar(metodo, camino, consulta, '401 (sesión vencida)');
     cuenta.descartar();
     throw new SesionVencida();
   }
@@ -144,12 +172,17 @@ async function enviar(metodo, camino, consulta, cuerpo) {
       motivo = (e.errors && e.errors[0] && e.errors[0].reason) || '';
       mensaje = e.message || texto;
     } catch (e) { /* respuesta que no es JSON */ }
+    anotar(metodo, camino, consulta, `${r.status} ${motivo}: ${String(mensaje).slice(0, 200)}`);
     throw new ErrorYouTube(r.status, motivo, mensaje);
   }
+  anotar(metodo, camino, consulta, String(r.status));
   return texto ? JSON.parse(texto) : {};
 }
 
 export const youtube = {
+  /** Lo pone la pantalla, si quiere dejar registro: `(texto) => {}` con cada pedido y su resultado. */
+  alPedir: null,
+
   /** Nombre del canal de la cuenta con la que se inició sesión (null si la cuenta no tiene canal). */
   async canal() {
     const j = await enviar('GET', 'channels', { part: 'snippet', mine: 'true' });
@@ -179,6 +212,74 @@ export const youtube = {
       resultado.push(...(j.items || []).map(claveDeJson));
     }
     return resultado;
+  },
+
+  /** Una transmisión, como está ahora en YouTube. */
+  async transmision(id) {
+    const j = await enviar('GET', 'liveBroadcasts', { part: 'snippet,contentDetails,status', id });
+    const item = (j.items || [])[0];
+    if (!item) throw new ErrorYouTube(404, 'notFound', 'La transmisión ya no existe.');
+    const b = transmisionDeJson(item);
+    if (this.alPedir) this.alPedir(`   "${b.titulo}" estado=${b.estado} clave=${b.claveId} monitor=${b.monitor} autoInicio=${b.autoInicio} privacidad=${b.privacidad}`);
+    return b;
+  },
+
+  /** Una clave de transmisión, o null si ya no existe. */
+  async clave(id) {
+    const j = await enviar('GET', 'liveStreams', { part: 'snippet,cdn,status', id });
+    const item = (j.items || [])[0];
+    if (!item) return null;
+    const c = claveDeJson(item);
+    // Al registro va cómo es la clave, nunca la clave.
+    if (this.alPedir) this.alPedir(`   clave "${c.titulo}" señal=${c.senal} tipo=${c.tipo} entrada=${c.direccion ? 'sí' : 'no'} segura=${c.direccionSegura ? 'sí' : 'no'} nombre=${c.nombre ? 'sí' : 'no'}`);
+    return c;
+  },
+
+  /** Crea una clave nueva, de un solo uso, con resolución y cuadros por segundo detectados por YouTube. */
+  async crearClave(titulo) {
+    const j = await enviar('POST', 'liveStreams', { part: 'snippet,cdn,contentDetails,status' }, {
+      snippet: { title: titulo },
+      cdn: { ingestionType: 'rtmp', resolution: 'variable', frameRate: 'variable' },
+      contentDetails: { isReusable: false },
+    });
+    return claveDeJson(j);
+  },
+
+  borrarClave(id) {
+    return enviar('DELETE', 'liveStreams', { id });
+  },
+
+  /** Asigna la clave `idClave` a la transmisión `idTransmision`. */
+  asignar(idTransmision, idClave) {
+    return enviar('POST', 'liveBroadcasts/bind', { id: idTransmision, part: 'id,contentDetails', streamId: idClave });
+  },
+
+  /** Le saca la clave a la transmisión (queda sin ninguna, como recién creada). */
+  desasignar(idTransmision) {
+    return enviar('POST', 'liveBroadcasts/bind', { id: idTransmision, part: 'id,contentDetails' });
+  },
+
+  /** Cambia el estado de la transmisión: testing | live | complete. */
+  pasarA(idTransmision, estado) {
+    return enviar('POST', 'liveBroadcasts/transition', { broadcastStatus: estado, id: idTransmision, part: 'status' });
+  },
+
+  /**
+   * Pone los `capitulos` al final de la descripción del video `idVideo` (YouTube los muestra como
+   * capítulos). Lo que ya decía la descripción se respeta.
+   */
+  async ponerCapitulos(idVideo, capitulos) {
+    const j = await enviar('GET', 'videos', { part: 'snippet', id: idVideo });
+    const item = (j.items || [])[0];
+    if (!item) throw new ErrorYouTube(404, 'notFound', 'El video ya no existe.');
+    const snippet = item.snippet || {};
+    // Al cambiar el snippet YouTube pide título y categoría, y borra lo que no se manda (etiquetas,
+    // idioma): se reenvía todo lo que tenía.
+    const nuevo = { description: descripcionConCapitulos(snippet.description || '', capitulos) };
+    for (const k of ['title', 'categoryId', 'tags', 'defaultLanguage', 'defaultAudioLanguage']) {
+      if (snippet[k] != null) nuevo[k] = snippet[k];
+    }
+    await enviar('PUT', 'videos', { part: 'snippet' }, { id: idVideo, snippet: nuevo });
   },
 
   /**
