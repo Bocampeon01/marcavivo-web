@@ -6,12 +6,41 @@ import { Marcador, cargarLetra, color } from './marcador.js';
 import { servidor, VERSION } from './servidor.js';
 import { Envio } from './envio.js';
 import { Logos } from './logos.js';
-import { $, icono, escapar, avisar, cartel, cabecera, elegir, confirmar, pedirNumero, pedirPin } from './ui.js';
+import { cuenta, SesionVencida } from './cuenta.js';
+import { youtube, describirError } from './youtube.js';
+import { EnVivo, PREFIJO_CLAVE, ClaveAjena, ProgramadaDeCamara, ErrorDeEstado, TiempoAgotado, Cancelado, PasoFallido, estadoLegible, etiquetaDelAparato } from './envivo.js';
+import { armarCapitulos, MINIMO_CAPITULOS } from './capitulos.js';
+import { $, icono, escapar, avisar, cartel, cabecera, elegir, confirmar, explicar, pedirNumero, pedirPin, ir } from './ui.js';
 
 const parametros = servidor.parametros;
 
 // El servidor pide un PIN cuando se entra desde afuera de la PC del servidor.
 servidor.pedirPin = pedirPin;
+
+/** Con `?t=<id>` se transmite en esa programada de YouTube; sin eso, a la clave que tiene el servidor. */
+const idProgramada = /^[A-Za-z0-9_-]{5,40}$/.test(parametros.get('t') || '') ? parametros.get('t') : '';
+const automatico = !!idProgramada;
+
+// ---- Registro -----------------------------------------------------------------------------------
+// Lo que va pasando (toques, estados, pedidos a YouTube y qué contestó) se manda al servidor y queda
+// en servidor/informes.log, para revisar una prueba sin depender de capturas. Nunca lleva claves.
+const pendientes = [];
+function anotar(texto) {
+  pendientes.push(`${new Date().toLocaleTimeString('es-AR', { hour12: false })} ${texto}`);
+  if (pendientes.length > 80) pendientes.shift();
+}
+let mandandoRegistro = false;
+setInterval(async () => {
+  // Hasta que el servidor no aceptó el PIN no se manda nada (queda esperando): pedidos repetidos
+  // con un PIN viejo harían que el servidor frene a este celular por un minuto.
+  if (mandandoRegistro || !pendientes.length || !servidor.entro) return;
+  mandandoRegistro = true;
+  const n = Math.min(10, pendientes.length);
+  const r = await servidor.informar('REGISTRO | ' + pendientes.slice(0, n).join(' | '));
+  if (r && r.ok) pendientes.splice(0, n);
+  mandandoRegistro = false;
+}, 3000);
+youtube.alPedir = anotar;
 
 // ---- Partido y marcador -------------------------------------------------------------------------
 const CONFIG_POR_DEFECTO = {
@@ -20,7 +49,8 @@ const CONFIG_POR_DEFECTO = {
   minutos: 30,
   tiempos: 2,
 };
-const CLAVE = 'manual';
+/** Cada programada tiene su partido guardado; sin programada, el de siempre. */
+const CLAVE = idProgramada || 'manual';
 const partido = Partido.cargar(CLAVE) || new Partido(ConfigPartido.ultima() || CONFIG_POR_DEFECTO, { clave: CLAVE });
 
 const lienzo = $('lienzo');
@@ -157,8 +187,17 @@ $('bRed').onclick = () => {
 };
 
 // ---- Salir en vivo ------------------------------------------------------------------------------
-/** 'detenido' | 'conectando' | 'enVivo' | 'finalizando' */
+// Dos modos. Con una programada de YouTube elegida en el inicio (automático): se le prepara la
+// clave, el servidor manda el video a esa clave y se la pasa a "en vivo"; al terminar se finaliza.
+// Sin programada (manual): el servidor manda el video a la clave que tiene cargada.
+
+/**
+ * 'detenido' | 'preparando' | 'conectando' | 'esperandoYouTube' | 'enVivo' | 'deteniendo' | 'finalizando'
+ * ('preparando', 'esperandoYouTube' y 'deteniendo' solo pasan con una programada).
+ */
 let estado = 'detenido';
+/** Estados en los que este celular le está mandando el video al servidor. */
+const ENVIANDO = ['conectando', 'esperandoYouTube', 'enVivo'];
 let envio = null;
 let medida = null;
 let mensaje = '';
@@ -168,6 +207,17 @@ let reconectando = false;
 let intentando = false;    // hay una reconexión en marcha
 let cortesSeguidos = 0;
 let relanzos = 0;          // veces que hubo que pedirle de nuevo al servidor que salga
+let destinoActual;         // a dónde se le pide al servidor que salga (sin nada: la clave que tiene cargada)
+let conexion = null;       // { ok, mal }: se cumple cuando el servidor empezó a mandar el video
+
+const pausa = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+function ponerEstado(nuevo, texto = '') {
+  if (nuevo !== estado) anotar('estado: ' + nuevo);
+  estado = nuevo;
+  mensaje = texto;
+  pintar();
+}
 
 function nuevoEnvio() {
   const pista = flujo ? flujo.getAudioTracks()[0] || null : null;
@@ -180,12 +230,11 @@ function nuevoEnvio() {
   return envio.conectar();
 }
 
+/** Modo manual: conecta con el servidor y, cuando sube la calidad, sale a la clave que tiene cargada. */
 async function salirEnVivo() {
   if (!flujo) return avisar('Primero hay que abrir la cámara.');
-  estado = 'conectando';
   saliendo = false; reconectando = false; cortesSeguidos = 0; relanzos = 0; medida = null;
-  mensaje = 'Conectando con el servidor…';
-  pintar();
+  ponerEstado('conectando', 'Conectando con el servidor…');
   try {
     await nuevoEnvio();
   } catch (e) {
@@ -197,7 +246,7 @@ async function salirEnVivo() {
 /** Llega cada 2 segundos con lo que mide el envío, y cuando cambia la conexión. */
 function alMedir(m) {
   medida = m;
-  if (estado === 'detenido' || estado === 'finalizando') return;
+  if (!ENVIANDO.includes(estado)) return;
   if (m.conexion === 'failed' || m.conexion === 'closed') return reconectar();
   if (m.conexion === 'connected') cortesSeguidos = 0;
   // Al salir por primera vez se espera a que suba la calidad; al reconectar, apenas hay conexión.
@@ -210,18 +259,36 @@ function alMedir(m) {
   pintar();
 }
 
+/** Le pide al servidor que empiece a mandar el video a `destinoActual`. */
 async function pedirSalida() {
   saliendo = true;
   try {
-    const s = await servidor.estado(true).catch(() => null);
-    if (!s || !s.transmitiendo) await servidor.salir();
-    if (estado !== 'conectando' && estado !== 'enVivo') return;
-    if (estado === 'conectando') desdeVivo = Date.now();
-    estado = 'enVivo';
+    let s = await servidor.estado(true).catch(() => null);
+    // Si por esta ruta quedó saliendo otra cosa (otra programada, o la clave del servidor), se
+    // corta y se sale de nuevo: el video no puede ir a parar a otra transmisión.
+    if (s && s.transmitiendo && s.marca != null && s.marca !== CLAVE) {
+      anotar(`el servidor estaba saliendo con "${s.marca}": se corta y se sale de nuevo`);
+      await servidor.cortar();
+      for (let i = 0; i < 12 && s && s.transmitiendo; i++) {
+        await pausa(500);
+        s = await servidor.estado(false).catch(() => null);
+      }
+    }
+    if (!s || !s.transmitiendo) await servidor.salir(destinoActual, CLAVE);
+    if (!ENVIANDO.includes(estado)) return;
+    if (conexion) {
+      // Con una programada todavía falta YouTube: sigue salirConProgramada.
+      const c = conexion;
+      conexion = null;
+      c.ok();
+    } else if (estado === 'conectando') {
+      desdeVivo = Date.now();
+      estado = 'enVivo';
+    }
     reconectando = false;
-    mensaje = '';
+    if (estado === 'enVivo') mensaje = '';
   } catch (e) {
-    if (estado === 'conectando' || estado === 'enVivo') detener('No se pudo salir en vivo: ' + e.message);
+    if (ENVIANDO.includes(estado)) fallaEnvio('No se pudo salir en vivo: ' + e.message);
   }
   pintar();
 }
@@ -230,15 +297,15 @@ async function pedirSalida() {
 async function reconectar() {
   if (intentando) return;
   cortesSeguidos++;
-  if (cortesSeguidos > 6) return detener('Se cortó la conexión con el servidor y no se pudo recuperar. Revisá internet y volvé a salir.');
+  if (cortesSeguidos > 6) return fallaEnvio('Se cortó la conexión con el servidor y no se pudo recuperar. Revisá internet y volvé a salir.');
   intentando = true;
   reconectando = true;
   saliendo = false;
   mensaje = 'Se cortó la conexión con el servidor. Reconectando…';
   pintar();
   if (envio) envio.cerrar();
-  await new Promise((ok) => setTimeout(ok, 2500));
-  const sigue = () => estado === 'conectando' || estado === 'enVivo';
+  await pausa(2500);
+  const sigue = () => ENVIANDO.includes(estado);
   try {
     if (sigue()) await nuevoEnvio();
   } catch (e) {
@@ -248,33 +315,335 @@ async function reconectar() {
   }
 }
 
+/** Falló el envío al servidor. Si todavía se estaba saliendo en una programada, frena ese intento. */
+function fallaEnvio(texto) {
+  if (automatico && (estado === 'conectando' || estado === 'esperandoYouTube')) frenar(texto);
+  else detener(texto);
+}
+
 function detener(texto = '') {
   if (envio) envio.cerrar();
   envio = null;
   medida = null;
-  estado = 'detenido';
   saliendo = false; reconectando = false;
-  mensaje = texto;
+  ponerEstado('detenido', texto);
   if (texto) avisar(texto, 7000);
-  pintar();
+}
+
+/** Deja de mandar el video: cierra el envío y le avisa al servidor que corte. */
+async function pararSenal() {
+  if (envio) envio.cerrar();
+  envio = null;
+  medida = null;
+  saliendo = false; reconectando = false;
+  try { await servidor.cortar(); } catch (e) { /* el servidor corta solo cuando deja de llegarle el video */ }
 }
 
 async function cortar() {
   if (!(await confirmar('Cortar', '¿Cortar la transmisión?', 'CORTAR', 'SEGUIR'))) return;
   if (estado !== 'enVivo') return;
-  estado = 'finalizando';
-  pintar();
+  ponerEstado('finalizando');
   let error = '';
   try { await servidor.cortar(); } catch (e) { error = e.message; }
   detener(error ? 'No se pudo avisar al servidor que corte: ' + error : '');
   if (!error) avisar('Transmisión cortada.');
 }
 
-$('bPrincipal').onclick = () => {
-  if (estado === 'detenido') salirEnVivo();
-  else if (estado === 'conectando') detener('Cancelado.');
-  else if (estado === 'enVivo') cortar();
+// ---- Con una programada de YouTube --------------------------------------------------------------
+const enVivo = new EnVivo(youtube);
+/** Código de este aparato: va en el título de las claves que crea, para reconocer la propia. */
+const ETIQUETA = automatico ? etiquetaDelAparato() : '';
+/** La transmisión elegida. Al abrir se sabe lo que se guardó al elegirla; después se relee de YouTube. */
+let programada = { id: idProgramada, titulo: '', enVivo: false, ...(programadaGuardada() || {}) };
+/** Está en vivo en YouTube, aunque este celular no esté mandando señal. */
+let enVivoEnYouTube = !!programada.enVivo;
+/** Falló la finalización (por ejemplo sin internet): el botón ofrece reintentarla. */
+let finalizarPendiente = false;
+/** Clave de YouTube que usa esta transmisión. */
+let claveActual = null;
+/** Por qué se frena el intento de salir en vivo: 'cancelado', o el error del envío. Vacío: sigue. */
+let motivoCorte = '';
+/** Ya se le pidió a YouTube el paso a "en vivo": desde acá no se puede cancelar. */
+let pasando = false;
+/** El celular bloqueó la ventana de Google: en el próximo toque se pide antes que nada. */
+let renovarPrimero = false;
+
+function programadaGuardada() {
+  try {
+    const p = JSON.parse(localStorage.getItem('programada') || 'null');
+    return p && p.id === idProgramada ? { titulo: String(p.titulo || ''), enVivo: !!p.enVivo } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Relee la programada de YouTube: el título y, sobre todo, si ya está en vivo (para RETOMAR). */
+async function leerProgramada() {
+  if (!cuenta.activa) return pintar();
+  try {
+    programada = await youtube.transmision(idProgramada);
+    enVivoEnYouTube = programada.enVivo;
+    if (estado === 'detenido' && ['complete', 'revoked'].includes(programada.estado)) {
+      mensaje = 'Esta transmisión ya está finalizada en YouTube: no se puede volver a salir en vivo en ella.';
+    }
+  } catch (e) {
+    if (estado === 'detenido') mensaje = textoFallo(e);
+  }
+  pintar();
+}
+
+/**
+ * Antes de un paso largo se mira que a la sesión de Google le quede tiempo; si no, se abre la
+ * ventana de Google para renovarla (suele cerrarse sola). Devuelve false si no se pudo.
+ */
+async function asegurarSesion(minutos) {
+  try {
+    await cuenta.asegurar(minutos);
+    renovarPrimero = false;
+    return true;
+  } catch (e) {
+    renovarPrimero = !!e && e.tipo === 'popup_failed_to_open';
+    anotar('no se pudo renovar la sesión de Google: ' + ((e && (e.tipo || e.message)) || e));
+    avisar(renovarPrimero ? 'El celular no dejó abrir la ventana de Google. Tocá el botón de nuevo.' : describirError(e), 7000);
+    pintar();
+    return false;
+  }
+}
+
+/** Qué salió mal, en castellano; si fue el cambio de estado en YouTube, en qué paso y cómo quedó. */
+function textoFallo(e) {
+  if (e instanceof PasoFallido) return `No se pudo ${e.paso}: ${textoFallo(e.causa)}\nEstado en YouTube: ${estadoLegible(e.estado)}.`;
+  if (e instanceof ErrorDeEstado || e instanceof TiempoAgotado) return e.message;
+  if (e instanceof SesionVencida) return 'La sesión de Google venció. Tocá el botón de nuevo para renovarla.';
+  return describirError(e);
+}
+
+/** Frena el intento de salir en vivo: lo canceló quien transmite, o falló el envío al servidor. */
+function frenar(motivo) {
+  if (!motivoCorte) motivoCorte = motivo;
+  if (conexion) {
+    const c = conexion;
+    conexion = null;
+    c.mal(new Cancelado());
+  }
+  // Si YouTube ya está pasando a "en vivo" hay que esperar a que termine.
+  if (!pasando && estado !== 'detenido') ponerEstado('deteniendo', motivo === 'cancelado' ? 'Cancelando…' : motivo);
+}
+
+/** Conecta con el servidor y espera a que empiece a mandarle el video a YouTube. */
+function conectarConServidor() {
+  saliendo = false; reconectando = false; cortesSeguidos = 0; relanzos = 0; medida = null;
+  return new Promise((ok, mal) => {
+    conexion = { ok, mal };
+    nuevoEnvio().catch((e) => frenar('No se pudo conectar con el servidor: ' + e.message));
+  });
+}
+
+async function salirConProgramada() {
+  if (!flujo) return avisar('Primero hay que abrir la cámara.');
+  const retomar = enVivoEnYouTube;
+  const titulo = programada.titulo || 'la programada elegida';
+  const seguir = await confirmar(
+    retomar ? 'Retomar la transmisión' : 'Salir en vivo',
+    retomar
+      ? `"${titulo}" ya está en vivo en YouTube. Se vuelve a mandar la señal desde este celular.`
+      : `Vas a salir EN VIVO en YouTube en:\n\n"${titulo}"` + (servidor.destino === 'local' ? '\n\n(Ensayo: el video no sale a YouTube.)' : ''),
+    retomar ? 'RETOMAR' : 'SALIR EN VIVO', 'CANCELAR', { ic: retomar ? 'repetir' : 'camara' });
+  if (!seguir || estado !== 'detenido') return;
+  if (!(await asegurarSesion(10))) return;
+  anotar(`toca ${retomar ? 'RETOMAR' : 'SALIR EN VIVO'} en "${titulo}" (${idProgramada})`);
+
+  motivoCorte = '';
+  finalizarPendiente = false;
+  pasando = false;
+  const frenado = () => !!motivoCorte;
+  // Clave que se le asignó a la programada: si no se llega a salir en vivo, se le devuelve la que
+  // tenía, para que se pueda usar desde YouTube (ver EnVivo.devolver).
+  let asignada = null, salio = false, error = null;
+  try {
+    ponerEstado('preparando');
+    try {
+      asignada = await enVivo.prepararClave(programada, ETIQUETA);
+    } catch (e) {
+      if (e instanceof ProgramadaDeCamara) {
+        // Hecha con la app de YouTube del celular: no sirve para MarcaVivo. No se toca nada.
+        ponerEstado('detenido');
+        await explicar('Hecha con el celular',
+          'Esta programada se creó con la app de YouTube del celular y no sirve para MarcaVivo. No se tocó nada.\n\n' +
+          'Se puede convertir desde la app de Android (queda igual, con un link nuevo), o crear una nueva con PROGRAMAR.', 'ENTENDIDO', { ic: 'celular' });
+        return;
+      }
+      if (!(e instanceof ClaveAjena)) throw e;
+      const tomar = await confirmar('Otro celular estaba transmitiendo',
+        'Este partido lo estaba transmitiendo otro celular. Seguí desde este SOLO si el otro ya no transmite (se apagó, se quedó ' +
+        'sin batería o se cortó). Si los dos mandan señal a la vez, la transmisión se va a ver mal.', 'SEGUIR DESDE ESTE', 'CANCELAR');
+      if (!tomar) return ponerEstado('detenido');
+      asignada = await enVivo.prepararClave(programada, ETIQUETA, { tomarAjena: true });
+    }
+    claveActual = asignada.clave;
+    if (frenado()) throw new Cancelado();
+
+    destinoActual = claveActual.urlDesdeServidor;
+    ponerEstado('conectando', 'Conectando con el servidor…');
+    await conectarConServidor();
+    if (frenado()) throw new Cancelado();
+
+    ponerEstado('esperandoYouTube', 'El servidor ya manda el video. Esperando que YouTube lo reciba…');
+    await enVivo.esperarSenal(claveActual.id, { cancelado: frenado });
+    if (frenado()) throw new Cancelado();
+    pasando = true;
+    mensaje = 'YouTube ya recibe el video. Pasando a en vivo…';
+    pintar();
+    await enVivo.verificarClave(idProgramada, claveActual.id);
+    await enVivo.salirEnVivo(idProgramada);
+    salio = true;
+  } catch (e) {
+    error = e;
+  }
+  pasando = false;
+
+  if (salio) {
+    enVivoEnYouTube = true;
+    if (motivoCorte) {
+      // Quedó en vivo en YouTube, pero en el medio se perdió el envío: se retoma con RETOMAR.
+      await pararSenal();
+      ponerEstado('detenido');
+      await explicar('Se cortó el envío', motivoCorte + '\n\nLa transmisión quedó en vivo en YouTube: tocá RETOMAR.', 'ENTENDIDO', { ic: 'camaraNo' });
+      return;
+    }
+    desdeVivo = Date.now();
+    ponerEstado('enVivo');
+    avisar(retomar ? 'Transmisión retomada.' : 'En vivo en YouTube.');
+    return;
+  }
+
+  // No se salió (falló o se canceló): se corta el video y la programada vuelve a como estaba.
+  if (!(error instanceof Cancelado)) anotar('no se pudo salir en vivo: ' + ((error && error.message) || error));
+  if (estado !== 'deteniendo') ponerEstado('deteniendo', 'Un momento…');
+  await pararSenal();
+  const quedo = retomar ? '' : await devolverProgramada(asignada);
+  if (motivoCorte === 'cancelado') {
+    ponerEstado('detenido');
+    avisar('Cancelado.' + (retomar ? '' : ' La transmisión sigue programada en YouTube.'));
+    return;
+  }
+  // Un cartel, no un aviso que se va solo: hay que alcanzar a leerlo.
+  ponerEstado('detenido');
+  await explicar('No se pudo salir en vivo', (motivoCorte || textoFallo(error)) + quedo, 'ENTENDIDO', { ic: 'camaraNo' });
+}
+
+/** Deja la programada con la clave que tenía antes y dice cómo quedó, para sumarlo al mensaje de error. */
+async function devolverProgramada(asignada) {
+  if (!asignada) return '';
+  if (!asignada.creada) {
+    // Se transmitió a la clave propia de la programada: no se le cambió nada.
+    return asignada.clave.titulo.startsWith(PREFIJO_CLAVE) ? '' : '\nLa programada no se modificó: se puede usar desde la app de YouTube.';
+  }
+  try {
+    if (await enVivo.devolver(idProgramada, asignada)) {
+      if (claveActual && claveActual.id === asignada.clave.id) claveActual = null;
+      return '\nLa programada quedó como estaba: se puede usar desde YouTube.';
+    }
+    return '\nLa programada ya pasó a "en prueba" con la clave de este celular: tocá SALIR EN VIVO para reintentar desde acá.';
+  } catch (e) {
+    return '\nNo se pudo dejar la programada como estaba: ' + textoFallo(e);
+  }
+}
+
+/** La clave que hay que borrar al finalizar: solo las que creó MarcaVivo. */
+async function claveParaBorrar() {
+  let c = claveActual;
+  if (!c) {
+    // La página se recargó en medio de la transmisión: se mira cuál tiene asignada, y solo cuenta
+    // si es la de este aparato.
+    const b = await youtube.transmision(idProgramada);
+    c = b.claveId ? await youtube.clave(b.claveId) : null;
+    if (c && !c.titulo.endsWith(`[${ETIQUETA}]`)) c = null;
+  }
+  return c && c.titulo.startsWith(PREFIJO_CLAVE) ? c.id : null;
+}
+
+async function finalizar({ preguntar = true } = {}) {
+  if (preguntar && !(await confirmar('Finalizar la transmisión',
+    'Se corta la transmisión y queda FINALIZADA en YouTube. No se puede volver a salir en vivo en esta misma programada.',
+    'FINALIZAR', 'CANCELAR', { ic: 'stop', peligro: true }))) return;
+  if (estado !== 'enVivo' && estado !== 'detenido') return;
+  // Un partido dura más que la sesión de Google: casi siempre hay que renovarla acá.
+  if (!(await asegurarSesion(3))) return;
+  anotar('toca FINALIZAR');
+  ponerEstado('finalizando');
+  let error = '';
+  try {
+    await enVivo.finalizar(idProgramada, { idClave: await claveParaBorrar() });
+  } catch (e) {
+    error = textoFallo(e);
+  }
+  await pararSenal();
+  if (error) {
+    // El video ya se cortó; la transmisión puede seguir abierta en YouTube.
+    finalizarPendiente = true;
+    ponerEstado('detenido', 'La transmisión puede seguir abierta en YouTube: tocá REINTENTAR FINALIZAR.');
+    await explicar('No se pudo finalizar', `No se pudo finalizar en YouTube: ${error}\n\nEl video ya se cortó. Tocá REINTENTAR FINALIZAR.`, 'ENTENDIDO', { ic: 'stop' });
+    return;
+  }
+  enVivoEnYouTube = false;
+  finalizarPendiente = false;
+  claveActual = null;
+  const capitulos = await marcarCapitulos();
+  ponerEstado('detenido');
+  await explicar('Transmisión finalizada', 'La transmisión quedó finalizada en YouTube.' + (capitulos ? '\n\n' + capitulos : ''),
+    'VOLVER AL INICIO', { ic: 'listo', fijo: true });
+  // Partido terminado: que no se ofrezca retomarlo.
+  partido.cerrar();
+  Partido.borrar(CLAVE);
+  ir('./', { t: null });
+}
+
+/**
+ * Pone los momentos del partido (inicio de cada tiempo, entretiempo, goles y final) como capítulos
+ * del video en YouTube. Devuelve qué pasó, para avisarle a quien transmite, o '' si no había nada
+ * que marcar. Si falla, la transmisión ya está finalizada igual.
+ */
+async function marcarCapitulos() {
+  const marcas = partido.marcas;
+  if (!marcas.length) return '';
+  try {
+    const b = await youtube.transmision(idProgramada);
+    if (!b.salioAlAireEl) return ''; // nunca salió al aire: no hay video
+    const capitulos = armarCapitulos(marcas, b.salioAlAireEl.getTime());
+    anotar(capitulos.length ? 'capítulos: ' + capitulos.join(' | ') : `capítulos: menos de ${MINIMO_CAPITULOS}, no se ponen`);
+    if (!capitulos.length) return '';
+    await youtube.ponerCapitulos(idProgramada, capitulos);
+    return 'Goles y tiempos marcados en el video.';
+  } catch (e) {
+    anotar('no se pudieron poner los capítulos: ' + ((e && e.message) || e));
+    return 'No se pudieron marcar los goles en el video: ' + textoFallo(e);
+  }
+}
+
+$('bPrincipal').onclick = async () => {
+  if (!automatico) {
+    if (estado === 'detenido') salirEnVivo();
+    else if (estado === 'conectando') detener('Cancelado.');
+    else if (estado === 'enVivo') cortar();
+    return;
+  }
+  if (estado === 'detenido') {
+    // Si la vez anterior el celular bloqueó la ventana de Google, se pide en este mismo toque,
+    // antes de preguntar nada.
+    if (renovarPrimero && !(await asegurarSesion(10))) return;
+    if (finalizarPendiente) finalizar({ preguntar: false });
+    else salirConProgramada();
+  } else if (estado === 'enVivo') {
+    finalizar();
+  } else if (['preparando', 'conectando', 'esperandoYouTube'].includes(estado) && !pasando) {
+    anotar('toca CANCELAR');
+    frenar('cancelado');
+  }
 };
+// Está en vivo en YouTube pero este celular no manda video (se recargó la página, o el partido
+// terminó y nadie lo finalizó): se puede finalizar sin retomar.
+$('bFinalizar').onclick = () => { if (automatico && estado === 'detenido') finalizar(); };
 
 // Mientras está al aire se mira que el servidor siga transmitiendo, y se le manda lo que muestra
 // esta pantalla (queda en servidor/informes.log para revisar una prueba después).
@@ -288,9 +657,10 @@ setInterval(async () => {
       // El ffmpeg del servidor terminó (por ejemplo, después de un corte): se le pide que salga de
       // nuevo. Si pasa varias veces seguidas, algo anda mal de verdad y se frena.
       if (envio && envio.conectado && ++relanzos <= 3) {
-        await servidor.salir();
+        await servidor.salir(destinoActual, CLAVE);
       } else {
-        detener(`El servidor dejó de transmitir${s.codigoSalida != null ? ` (código ${s.codigoSalida})` : ''}. Volvé a salir en vivo.`);
+        detener(`El servidor dejó de transmitir${s.codigoSalida != null ? ` (código ${s.codigoSalida})` : ''}. ` +
+          (automatico ? 'Tocá RETOMAR.' : 'Volvé a salir en vivo.'));
       }
     }
   } catch (e) {
@@ -299,10 +669,18 @@ setInterval(async () => {
 }, 4000);
 setInterval(() => {
   if (!envio) return;
-  const texto = [lineas.version, lineas.camara, lineas.wake, `Estado: ${estado}${reconectando ? ' (reconectando)' : ''} · red ${red}`,
+  const texto = [lineas.version, lineas.camara, lineas.wake,
+    `Estado: ${estado}${reconectando ? ' (reconectando)' : ''} · red ${red}${automatico ? ` · programada ${idProgramada}` : ''}`,
     medida && medida.texto ? medida.texto.replace('Cuadros: ', `Cuadros: dibujo ${dibujoFps} fps · `) : ''].filter(Boolean).join('\n');
   servidor.informar(texto, { oculta: vecesOculta });
 }, 5000);
+
+// Si se cierra o se recarga la página en plena transmisión, el navegador pregunta antes.
+window.addEventListener('beforeunload', (e) => {
+  if (estado === 'detenido') return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 
 // ---- Controles del partido ----------------------------------------------------------------------
 const mmssCorto = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -433,15 +811,18 @@ document.querySelectorAll('.casilla').forEach((b) => {
 });
 
 // Equipos, colores, escudos, sponsors y partido nuevo: en la pantalla de datos del partido.
-$('bDatos').onclick = () => { location.href = 'partido.html' + location.search; };
-$('bInicio').onclick = () => { location.href = './' + location.search; };
+$('bDatos').onclick = () => ir('partido.html');
+$('bInicio').onclick = () => ir('./', { t: null });
 
 // ---- Pintar la pantalla -------------------------------------------------------------------------
 const ESTADOS = {
   detenido: ['Detenido', '#9E9E9E'],
+  preparando: ['Preparando la clave…', '#FF9800'],
   conectando: ['Conectando…', '#FFC107'],
+  esperandoYouTube: ['Esperando a YouTube…', '#FF9800'],
   enVivo: ['EN VIVO', '#F44336'],
-  finalizando: ['Cortando…', '#9E9E9E'],
+  deteniendo: ['Un momento…', '#9E9E9E'],
+  finalizando: [automatico ? 'Finalizando…' : 'Cortando…', '#FF9800'],
 };
 function ponerTexto(el, t) { if (el.textContent !== t) el.textContent = t; }
 function ponerHtml(el, h) { if (el._html !== h) { el.innerHTML = h; el._html = h; } }
@@ -452,6 +833,8 @@ function pintar() {
   // Estado y botón principal.
   let [texto, tono] = ESTADOS[estado];
   if (estado === 'enVivo' && reconectando) [texto, tono] = ['Reconectando…', '#FFC107'];
+  const sinSenal = automatico && estado === 'detenido' && enVivoEnYouTube;
+  if (sinSenal) [texto, tono] = ['En vivo en YouTube, sin señal de este celular', '#FFC107'];
   ponerTexto($('estadoTxt'), texto);
   $('estadoTxt').style.color = tono;
   $('punto').style.background = tono;
@@ -463,24 +846,39 @@ function pintar() {
   $('bRed').disabled = estado !== 'detenido';
 
   const b = $('bPrincipal');
-  const [etiqueta, ic, clase] = {
+  let [etiqueta, ic, clase] = {
     detenido: ['SALIR EN VIVO', 'camara', ''],
+    preparando: ['CANCELAR', 'cerrar', 'gris'],
     conectando: ['CANCELAR', 'cerrar', 'gris'],
-    enVivo: ['CORTAR', 'stop', 'rojo'],
-    finalizando: ['CORTANDO…', 'reloj', 'gris'],
+    esperandoYouTube: ['CANCELAR', 'cerrar', 'gris'],
+    enVivo: automatico ? ['FINALIZAR', 'stop', 'rojo'] : ['CORTAR', 'stop', 'rojo'],
+    deteniendo: ['UN MOMENTO…', 'reloj', 'gris'],
+    finalizando: [automatico ? 'FINALIZANDO…' : 'CORTANDO…', 'reloj', 'gris'],
   }[estado];
+  if (automatico && estado === 'detenido' && finalizarPendiente) [etiqueta, ic, clase] = ['REINTENTAR FINALIZAR', 'stop', 'rojo'];
+  else if (sinSenal) [etiqueta, ic, clase] = ['RETOMAR', 'repetir', ''];
   ponerHtml(b, icono(ic) + `<span>${etiqueta}</span>`);
   b.className = 'negrita ' + clase;
-  b.disabled = estado === 'finalizando' || (estado === 'detenido' && !flujo);
-  $('bDatos').hidden = $('bInicio').hidden = estado !== 'detenido';
+  // Reintentar la finalización no necesita la cámara; salir en vivo sí.
+  b.disabled = estado === 'finalizando' || estado === 'deteniendo' || pasando ||
+    (estado === 'detenido' && !flujo && !(automatico && finalizarPendiente));
+  $('bInicio').hidden = estado !== 'detenido';
+  // En vivo en YouTube y sin señal de este celular: en vez de los datos del partido (cambiarlos
+  // empieza un partido nuevo) se ofrece finalizar.
+  $('bDatos').hidden = estado !== 'detenido' || sinSenal || (automatico && finalizarPendiente);
+  $('bFinalizar').hidden = !sinSenal || finalizarPendiente;
 
+  const ensayo = servidor.destino === 'local';
   let abajo = mensaje;
   if (estado === 'enVivo' && !reconectando) {
     const s = Math.floor((Date.now() - desdeVivo) / 1000);
     abajo = `Al aire hace ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` +
-      (servidor.destino === 'local' ? ' · ensayo (no sale a YouTube)' : '') + (m && m.redMala ? '\nLa red está muy mala: la imagen puede salir trabada.' : '');
+      (ensayo ? ' · ensayo (no sale a YouTube)' : '') + (automatico && programada.titulo ? ' · ' + programada.titulo : '') +
+      (m && m.redMala ? '\nLa red está muy mala: la imagen puede salir trabada.' : '');
   } else if (estado === 'detenido' && !mensaje) {
-    abajo = (servidor.destino === 'local' ? 'Ensayo: no sale a YouTube. ' : '') + lineas.version;
+    abajo = (ensayo ? 'Ensayo: no sale a YouTube. ' : '') + (automatico
+      ? (programada.titulo || 'Programada ' + idProgramada) + (cuenta.activa ? '' : '\nLa sesión de Google venció: se renueva al tocar el botón.')
+      : lineas.version);
   }
   ponerTexto($('mensaje'), abajo);
 
@@ -546,5 +944,15 @@ cargarLetra().then(() => { marcador.redimensionar(W, H); });
 // Escudos y logos de sponsors guardados en este celular.
 Logos.cargar().then((l) => l.paraMarcador()).then((l) => marcador.ponerLogos(l)).catch(() => {});
 abrirCamara();
+if (automatico) {
+  // La ventana de Google tiene que poder abrirse en el mismo toque del botón: se deja lista.
+  cuenta.preparar();
+  anotar(`abre la programada "${programada.titulo}" (${idProgramada}) · aparato ${ETIQUETA}`);
+  leerProgramada();
+}
 // Para las pruebas automáticas y para mirar desde la consola.
-window.marcavivo = { get partido() { return partido; }, get estado() { return estado; }, get medida() { return medida; }, servidor };
+window.marcavivo = {
+  get partido() { return partido; }, get estado() { return estado; }, get medida() { return medida; }, servidor,
+  get programada() { return programada; }, get enVivoEnYouTube() { return enVivoEnYouTube; }, get mensaje() { return mensaje; },
+  get registro() { return [...pendientes]; },
+};
