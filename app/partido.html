@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MarcaVivo — Datos del partido</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12161C">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MarcaVivo">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icono-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icono-192.png">
+<link rel="stylesheet" href="app.css">
+<style>
+  /* "Datos del partido" y "Logos de sponsors": match_setup_page.dart y logos_page.dart de la app. */
+  body { background: var(--fondo); display: flex; flex-direction: column; overflow: hidden; }
+  .pantalla { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .cuerpoPantalla { flex: 1; min-height: 0; overflow: auto; padding: 16px; -webkit-overflow-scrolling: touch;
+    padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+
+  .equipos { display: flex; align-items: flex-start; }
+  .equipo { flex: 1; min-width: 0; }
+  .vs { padding: 12px 16px 0; font-size: 20px; color: rgba(255,255,255,.54); }
+  .rotulo { display: block; font-size: 12px; color: var(--suave); margin-bottom: 3px; }
+  .equipo input.campo { width: 100%; font-size: 16px; padding: 12px; text-transform: uppercase; }
+  .fila { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .fila > span { color: var(--suave); }
+  .muestraColor { width: 40px; height: 40px; border-radius: 6px; border: 1px solid rgba(255,255,255,.54); padding: 0; }
+  .escudo { width: 52px; height: 40px; border-radius: 6px; border: 1px solid rgba(255,255,255,.38); padding: 3px; color: var(--texto); }
+  .escudo.puesto { background: #fff; }
+  .escudo img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .escudo svg.ic { width: 18px; height: 18px; }
+  .quitar { width: 32px; height: 32px; color: var(--suave); }
+  .quitar svg.ic { width: 18px; height: 18px; }
+  .opciones { display: flex; flex-wrap: wrap; gap: 12px 32px; align-items: center; margin-top: 20px; }
+  .opciones .borde { height: 40px; padding: 0 16px; }
+  #error { color: #FFAB40; margin-top: 16px; }
+
+  /* Paleta de colores de camiseta. */
+  .paleta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .paleta button { flex-direction: column; gap: 2px; border-radius: 6px; font-size: 11px; font-weight: 400; width: 58px; }
+  .paleta i { width: 44px; height: 44px; border-radius: 6px; border: 1px solid rgba(255,255,255,.38); display: block; }
+  .paleta .actual i { border: 3px solid var(--ambar); }
+  .cartel.paletaCartel { width: 470px; }
+
+  /* Logos de sponsors. */
+  .ajustesLogos { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; margin-bottom: 12px; }
+  #rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .logo { position: relative; aspect-ratio: 16 / 10; background: #fff; border-radius: 8px; padding: 8px; display: flex; align-items: center; justify-content: center; }
+  .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .logo button { position: absolute; top: 2px; right: 2px; width: 34px; height: 34px; background: rgba(0,0,0,.54); color: #fff; }
+  .logo button svg.ic { width: 18px; height: 18px; }
+  #sinLogos { text-align: center; color: rgba(255,255,255,.6); padding: 24px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<section class="pantalla" id="pDatos">
+  <div class="barra">
+    <button class="icono" id="bVolver" title="Volver sin empezar un partido nuevo"></button>
+    <h1>Datos del partido</h1>
+    <button class="lleno" id="bContinuar"></button>
+  </div>
+  <div class="cuerpoPantalla">
+    <div class="equipos">
+      <div class="equipo" data-local="1">
+        <label class="rotulo" for="nombreLocal">Local</label>
+        <input class="campo" id="nombreLocal" maxlength="16" placeholder="Nombre del equipo" autocapitalize="characters" autocomplete="off" enterkeyhint="done">
+        <div class="fila">
+          <span>Colores</span>
+          <button class="muestraColor" data-color="1" title="Color de arriba"></button>
+          <button class="muestraColor" data-color="2" title="Color de abajo"></button>
+          <span style="margin-left:12px">Escudo</span>
+          <button class="escudo" title="Elegir el escudo"></button>
+          <button class="quitar" title="Quitar el escudo" hidden></button>
+        </div>
+      </div>
+      <div class="vs">vs</div>
+      <div class="equipo" data-local="0">
+        <label class="rotulo" for="nombreVisita">Visitante</label>
+        <input class="campo" id="nombreVisita" maxlength="16" placeholder="Nombre del equipo" autocapitalize="characters" autocomplete="off" enterkeyhint="done">
+        <div class="fila">
+          <span>Colores</span>
+          <button class="muestraColor" data-color="1" title="Color de arriba"></button>
+          <button class="muestraColor" data-color="2" title="Color de abajo"></button>
+          <span style="margin-left:12px">Escudo</span>
+          <button class="escudo" title="Elegir el escudo"></button>
+          <button class="quitar" title="Quitar el escudo" hidden></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="opciones">
+      <div class="grupo" id="gMinutos"><span>Minutos por tiempo</span></div>
+      <div class="grupo" id="gTiempos"><span>Tiempos</span></div>
+      <div class="grupo">
+        <button class="borde" id="bLogos"></button>
+        <button class="icono" id="bPreparar" title="Preparar una imagen (página web)"></button>
+      </div>
+    </div>
+    <div id="error" hidden></div>
+  </div>
+</section>
+
+<section class="pantalla" id="pLogos" hidden>
+  <div class="barra">
+    <button class="icono" id="bVolverLogos" title="Volver"></button>
+    <h1>Logos de sponsors</h1>
+    <button class="lleno" id="bAgregar"></button>
+  </div>
+  <div class="cuerpoPantalla">
+    <div class="ajustesLogos">
+      <div class="grupo" id="gSegundos"><span>Cambiar cada</span></div>
+      <div class="grupo" id="gEsquina"><span>Esquina</span></div>
+    </div>
+    <div id="rejilla"></div>
+    <div id="sinLogos" hidden>Todavía no hay logos.<br>Tocá AGREGAR y elegí las imágenes de los sponsors.<br>Salen mejor los PNG con fondo transparente o blanco.</div>
+  </div>
+</section>
+
+<div id="capa" hidden></div>
+<div id="aviso" hidden></div>
+<div id="girar">Girá el celular:<br>MarcaVivo se usa en horizontal.</div>
+
+<script type="module" src="datos.js"></script>
+</body>
+</html>
